@@ -61,7 +61,48 @@ La instalación AMD y la verificación de los dispositivos reales están documen
 en [ROCM-AMD.md](ROCM-AMD.md). El detalle de GPU está en
 `bench/results/laya-rocm-gpu.md`, con sus muestras en los JSON correspondientes.
 
-## Metodología
+## Prueba adicional: `allowIrreversible: true` con Laya GPU
+
+Se repitieron los cinco ejemplos tres veces en la misma RX 6600, con caché
+desactivada y las mismas comprobaciones del DOM. Solo se cambió la opción que
+permite continuar pese a la clasificación de irreversibilidad del modelo.
+
+| Métrica | Laya GPU, opción desactivada | Laya GPU, opción activada |
+|---|---:|---:|
+| Objetivos y finalizaciones que pasan las comprobaciones existentes | 9/15 | 15/15 |
+| Casilla | 0/3 | 3/3 |
+| Búsqueda | 0/3 | 3/3 |
+| Consultas medidas | 33 | 45 |
+| Latencia media por consulta | 951,30 ms | 958,64 ms |
+| Mediana | 901,28 ms | 898,21 ms |
+| P95 | 1.183,91 ms | 1.379,97 ms |
+| Tiempo acumulado de las tareas | 40,11 s | 54,42 s |
+
+El aumento de tiempo corresponde a ejecutar más acciones y comprobaciones en las
+tareas antes bloqueadas. La latencia por consulta fue similar; activar la opción
+**no acelera la inferencia**. Desbloqueó las seis ejecuciones que antes solicitaban
+confirmación, y no se registraron falsos `done` respecto de las assertions actuales.
+
+**Límite de la verificación:** la primera assertion de `search` solo verifica el
+texto del campo. La traza con la opción activada muestra `press_enter` sobre el
+botón Search durante el primer paso, que pide escribir *sin enviar*. Las comprobaciones
+existentes no detectan ese envío anticipado. Por tanto, **15/15 significa que se
+alcanzaron los estados comprobados, no que se respetaron todas las restricciones
+intermedias del objetivo**. La opción evita la pausa; no corrige esa decisión del modelo.
+
+Para repetir esta configuración por separado:
+
+```bash
+node bench/compare-backends.mjs --backend laya --repetitions 3 \
+  --allow-irreversible --out bench/results/laya-gpu-allow-irreversible
+```
+
+Datos de esta prueba:
+[reporte](bench/results/laya-gpu-allow-irreversible.md),
+[JSON completo](bench/results/laya-gpu-allow-irreversible.json) y
+[muestras de Laya](bench/results/laya-gpu-allow-irreversible-laya.json).
+
+## Metodología de la prueba original
 
 - Cinco ejemplos locales idénticos, 3 repeticiones por backend; orden: Jev, luego Laya.
 - Ejecución secuencial, contexto nuevo por ejemplo, navegador headless y caché desactivada.

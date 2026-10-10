@@ -77,6 +77,13 @@ See [BENCHMARK-JEV-LAYA.md](BENCHMARK-JEV-LAYA.md) for the full hardware table,
 methodology, and interpretation, and [ROCM-AMD.md](ROCM-AMD.md) for the verified
 AMD GPU setup.
 
+An additional AMD GPU run with `--allow-irreversible` passed **15/15 existing DOM
+checks**, versus 9/15 with the flag disabled, taking 54.42 s and 45 decision
+requests (mean 958.64 ms). The flag removes confirmation pauses, not model errors:
+the search trace submitted during a step requesting entry without submission,
+which the current field-value assertion does not detect. See the full report for
+this verification limitation and the separate run data.
+
 ## Results inherited from jev-browser
 
 The results below come from the original project's **Jev backend**, not from Laya.

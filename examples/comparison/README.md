@@ -85,3 +85,17 @@ nuevas consultas:
 ```bash
 node bench/compare-backends.mjs --from bench/results/backend-comparison.json --report BENCHMARK-JEV-LAYA.md
 ```
+
+## Probar sin la pausa por acciones consideradas irreversibles
+
+Para estos ejemplos locales, puedes comparar el resultado permitiendo las acciones
+que el modelo clasifique como irreversibles:
+
+```bash
+node bench/compare-backends.mjs --backend laya --repetitions 3 \
+  --allow-irreversible --out bench/results/laya-gpu-allow-irreversible
+```
+
+El flag envía `allowIrreversible: true` a cada paso. La comprobación del DOM y el
+presupuesto de acciones se mantienen. El JSON y el reporte registran si estuvo
+activado; sin el flag, continúa siendo `false`.

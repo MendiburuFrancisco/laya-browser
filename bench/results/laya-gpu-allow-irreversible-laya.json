@@ -1,0 +1,2292 @@
+{
+  "backend": "laya",
+  "endpoint": "http://127.0.0.1:8791/v1/systemone",
+  "model": "cklxx/laya-browser",
+  "health": {
+    "ok": true,
+    "pid": 143368,
+    "model": "cklxx/laya-browser",
+    "checks_model": "convaiinnovations/laya",
+    "device": "cuda:0",
+    "checks_device": "cuda:0",
+    "accelerator": "rocm",
+    "gpu_name": "AMD Radeon RX 6600",
+    "gpu_allocated_mb": 2854.6,
+    "inference_requests": 34,
+    "inference_completed": 34,
+    "inference_errors": 0,
+    "last_inference_ms": 1002.8,
+    "last_inference_cpu_ms": 1012.4
+  },
+  "repetitions": 3,
+  "headed": false,
+  "allow_irreversible": true,
+  "elapsed_ms": 55863.42,
+  "results": [
+    {
+      "id": "fill-field",
+      "repetition": 1,
+      "execution_ms": 2507.98,
+      "calls": 2,
+      "http_requests": 2,
+      "decision_ms": 1919.03,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 6608,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Enter the supplied email in the Email address field without submitting it",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 2086,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.01,
+              "done_plain": 0.01,
+              "done_change": 0.01,
+              "blocked": 0.01,
+              "error_shown": 0.41,
+              "login": 0.3,
+              "irreversible": 0.65,
+              "tool": "type",
+              "p_tool": 0.93,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:email \"Email address\"",
+              "value": "email",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:email \"Email address\""
+                }
+              ],
+              "act_ms": 156
+            },
+            {
+              "round": 1,
+              "done": 0.91,
+              "done_plain": 0.91,
+              "done_change": 0.91,
+              "blocked": 0.01,
+              "error_shown": 0.86,
+              "login": 0.91,
+              "irreversible": 0.92,
+              "tool": "none",
+              "p_tool": 0.92,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:email \"Email address\"",
+              "value": "email",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:email \"Email address\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "type",
+              "element": "input:email \"Email address\"",
+              "value": "email"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "checkbox",
+      "repetition": 1,
+      "execution_ms": 1931.3,
+      "calls": 2,
+      "http_requests": 2,
+      "decision_ms": 1465.28,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 5922,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Check the Subscribe to newsletter checkbox",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 1514,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.2,
+              "done_plain": 0.2,
+              "done_change": 0.2,
+              "blocked": 0.05,
+              "error_shown": 0.31,
+              "login": 0.17,
+              "irreversible": 0.88,
+              "tool": "click",
+              "p_tool": 0.45,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:checkbox \"Subscribe to newsletter\"",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:checkbox \"Subscribe to newsletter\""
+                }
+              ],
+              "act_ms": 42
+            },
+            {
+              "round": 1,
+              "done": 0.96,
+              "done_plain": 0.96,
+              "done_change": 0.96,
+              "blocked": 0.01,
+              "error_shown": 0.69,
+              "login": 0.58,
+              "irreversible": 0.88,
+              "tool": "none",
+              "p_tool": 0.96,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:checkbox \"Subscribe to newsletter\"",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:checkbox \"Subscribe to newsletter\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "click",
+              "element": "input:checkbox \"Subscribe to newsletter\""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "select-option",
+      "repetition": 1,
+      "execution_ms": 2284.04,
+      "calls": 2,
+      "http_requests": 2,
+      "decision_ms": 1839.82,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 6604,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Select Chile in the Country dropdown",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 1865,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.02,
+              "done_plain": 0.02,
+              "done_change": 0.02,
+              "blocked": 0.01,
+              "error_shown": 0.13,
+              "login": 0.11,
+              "irreversible": 0.88,
+              "tool": "select",
+              "p_tool": 0.92,
+              "target": 0,
+              "p_target": 1,
+              "el": "select \"Country\"",
+              "value": "country",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "select \"Country\""
+                }
+              ],
+              "act_ms": 18
+            },
+            {
+              "round": 1,
+              "done": 0.92,
+              "done_plain": 0.92,
+              "done_change": 0.92,
+              "blocked": 0.01,
+              "error_shown": 0.25,
+              "login": 0.58,
+              "irreversible": 0.86,
+              "tool": "none",
+              "p_tool": 0.93,
+              "target": 0,
+              "p_target": 1,
+              "el": "select \"Country\"",
+              "value": "country",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "select \"Country\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "select",
+              "element": "select \"Country\"",
+              "option": "Chile",
+              "value": "country"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "search",
+      "repetition": 1,
+      "execution_ms": 6599.31,
+      "calls": 5,
+      "http_requests": 5,
+      "decision_ms": 5220.15,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 17128,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Enter the supplied query in the Search books field without submitting it",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 4005,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.02,
+              "done_plain": 0.02,
+              "done_change": 0.02,
+              "blocked": 0.01,
+              "error_shown": 0.23,
+              "login": 0.52,
+              "irreversible": 0.89,
+              "tool": "type",
+              "p_tool": 0.89,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:search \"Search books\"",
+              "value": "query",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:search \"Search books\""
+                }
+              ],
+              "act_ms": 126
+            },
+            {
+              "round": 1,
+              "done": 0.05,
+              "done_plain": 0.05,
+              "done_change": 0.05,
+              "blocked": 0.01,
+              "error_shown": 0.65,
+              "login": 0.53,
+              "irreversible": 0.87,
+              "tool": "press_enter",
+              "p_tool": 0.86,
+              "target": 1,
+              "p_target": 0.96,
+              "el": "button \"Search\"",
+              "value": "query",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.96,
+                  "el": "button \"Search\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.04,
+                  "el": "input:search \"Search books\""
+                }
+              ],
+              "act_ms": 5
+            },
+            {
+              "round": 2,
+              "done": 0.92,
+              "done_plain": 0.92,
+              "done_change": 0.92,
+              "blocked": 0.01,
+              "error_shown": 0.67,
+              "login": 0.65,
+              "irreversible": 0.88,
+              "tool": "none",
+              "p_tool": 0.93,
+              "target": 1,
+              "p_target": 0.85,
+              "el": "button \"Search\"",
+              "value": "query",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.85,
+                  "el": "button \"Search\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.15,
+                  "el": "input:search \"Search books\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "type",
+              "element": "input:search \"Search books\"",
+              "value": "query"
+            },
+            {
+              "action": "press_enter",
+              "element": "button \"Search\""
+            }
+          ]
+        },
+        {
+          "goal": "Click the Search button to display results for the entered query",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 2174,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.01,
+              "done_plain": 0.01,
+              "done_change": 0.01,
+              "blocked": 0.01,
+              "error_shown": 0.67,
+              "login": 0.34,
+              "irreversible": 0.9,
+              "tool": "press_enter",
+              "p_tool": 0.92,
+              "target": 1,
+              "p_target": 0.99,
+              "el": "button \"Search\"",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.99,
+                  "el": "button \"Search\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.01,
+                  "el": "input:search \"Search books\""
+                }
+              ],
+              "act_ms": 3
+            },
+            {
+              "round": 1,
+              "done": 0.91,
+              "done_plain": 0.91,
+              "done_change": 0.91,
+              "blocked": 0.01,
+              "error_shown": 0.78,
+              "login": 0.72,
+              "irreversible": 0.86,
+              "tool": "none",
+              "p_tool": 0.92,
+              "target": 1,
+              "p_target": 0.98,
+              "el": "button \"Search\"",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.98,
+                  "el": "button \"Search\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.02,
+                  "el": "input:search \"Search books\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "press_enter",
+              "element": "button \"Search\""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "add-todo",
+      "repetition": 1,
+      "execution_ms": 4801.35,
+      "calls": 4,
+      "http_requests": 4,
+      "decision_ms": 3891.07,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 12743,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Enter the supplied task into the New task field without submitting it",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 2147,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.01,
+              "done_plain": 0.01,
+              "done_change": 0.01,
+              "blocked": 0.01,
+              "error_shown": 0.18,
+              "login": 0.13,
+              "irreversible": 0.66,
+              "tool": "type",
+              "p_tool": 0.93,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:text \"New task\"",
+              "value": "task",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:text \"New task\""
+                }
+              ],
+              "act_ms": 68
+            },
+            {
+              "round": 1,
+              "done": 0.91,
+              "done_plain": 0.91,
+              "done_change": 0.91,
+              "blocked": 0.01,
+              "error_shown": 0.7,
+              "login": 0.64,
+              "irreversible": 0.84,
+              "tool": "none",
+              "p_tool": 0.92,
+              "target": 0,
+              "p_target": 0.54,
+              "el": "input:text \"New task\"",
+              "value": "task",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 0.54,
+                  "el": "input:text \"New task\""
+                },
+                {
+                  "i": 1,
+                  "p": 0.46,
+                  "el": "button \"Add task\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "type",
+              "element": "input:text \"New task\"",
+              "value": "task"
+            }
+          ]
+        },
+        {
+          "goal": "Click Add task to add the entered task to the todo list",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 2234,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.02,
+              "done_plain": 0.02,
+              "done_change": 0.02,
+              "blocked": 0.01,
+              "error_shown": 0.15,
+              "login": 0.19,
+              "irreversible": 0.69,
+              "tool": "press_enter",
+              "p_tool": 0.88,
+              "target": 1,
+              "p_target": 0.99,
+              "el": "button \"Add task\"",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.99,
+                  "el": "button \"Add task\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.01,
+                  "el": "input:text \"New task\""
+                }
+              ],
+              "act_ms": 5
+            },
+            {
+              "round": 1,
+              "done": 0.93,
+              "done_plain": 0.93,
+              "done_change": 0.93,
+              "blocked": 0.01,
+              "error_shown": 0.44,
+              "login": 0.23,
+              "irreversible": 0.68,
+              "tool": "none",
+              "p_tool": 0.94,
+              "target": 1,
+              "p_target": 0.98,
+              "el": "button \"Add task\"",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.98,
+                  "el": "button \"Add task\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.02,
+                  "el": "input:text \"New task\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "press_enter",
+              "element": "button \"Add task\""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fill-field",
+      "repetition": 2,
+      "execution_ms": 2500.18,
+      "calls": 2,
+      "http_requests": 2,
+      "decision_ms": 1933.93,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 6608,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Enter the supplied email in the Email address field without submitting it",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 2082,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.01,
+              "done_plain": 0.01,
+              "done_change": 0.01,
+              "blocked": 0.01,
+              "error_shown": 0.41,
+              "login": 0.3,
+              "irreversible": 0.65,
+              "tool": "type",
+              "p_tool": 0.93,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:email \"Email address\"",
+              "value": "email",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:email \"Email address\""
+                }
+              ],
+              "act_ms": 142
+            },
+            {
+              "round": 1,
+              "done": 0.91,
+              "done_plain": 0.91,
+              "done_change": 0.91,
+              "blocked": 0.01,
+              "error_shown": 0.86,
+              "login": 0.91,
+              "irreversible": 0.92,
+              "tool": "none",
+              "p_tool": 0.92,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:email \"Email address\"",
+              "value": "email",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:email \"Email address\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "type",
+              "element": "input:email \"Email address\"",
+              "value": "email"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "checkbox",
+      "repetition": 2,
+      "execution_ms": 1935.52,
+      "calls": 2,
+      "http_requests": 2,
+      "decision_ms": 1471.92,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 5922,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Check the Subscribe to newsletter checkbox",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 1518,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.2,
+              "done_plain": 0.2,
+              "done_change": 0.2,
+              "blocked": 0.05,
+              "error_shown": 0.31,
+              "login": 0.17,
+              "irreversible": 0.88,
+              "tool": "click",
+              "p_tool": 0.45,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:checkbox \"Subscribe to newsletter\"",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:checkbox \"Subscribe to newsletter\""
+                }
+              ],
+              "act_ms": 39
+            },
+            {
+              "round": 1,
+              "done": 0.96,
+              "done_plain": 0.96,
+              "done_change": 0.96,
+              "blocked": 0.01,
+              "error_shown": 0.69,
+              "login": 0.58,
+              "irreversible": 0.88,
+              "tool": "none",
+              "p_tool": 0.96,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:checkbox \"Subscribe to newsletter\"",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:checkbox \"Subscribe to newsletter\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "click",
+              "element": "input:checkbox \"Subscribe to newsletter\""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "select-option",
+      "repetition": 2,
+      "execution_ms": 2291.36,
+      "calls": 2,
+      "http_requests": 2,
+      "decision_ms": 1850.82,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 6604,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Select Chile in the Country dropdown",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 1873,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.02,
+              "done_plain": 0.02,
+              "done_change": 0.02,
+              "blocked": 0.01,
+              "error_shown": 0.13,
+              "login": 0.11,
+              "irreversible": 0.88,
+              "tool": "select",
+              "p_tool": 0.92,
+              "target": 0,
+              "p_target": 1,
+              "el": "select \"Country\"",
+              "value": "country",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "select \"Country\""
+                }
+              ],
+              "act_ms": 16
+            },
+            {
+              "round": 1,
+              "done": 0.92,
+              "done_plain": 0.92,
+              "done_change": 0.92,
+              "blocked": 0.01,
+              "error_shown": 0.25,
+              "login": 0.58,
+              "irreversible": 0.86,
+              "tool": "none",
+              "p_tool": 0.93,
+              "target": 0,
+              "p_target": 1,
+              "el": "select \"Country\"",
+              "value": "country",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "select \"Country\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "select",
+              "element": "select \"Country\"",
+              "option": "Chile",
+              "value": "country"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "search",
+      "repetition": 2,
+      "execution_ms": 6597.09,
+      "calls": 5,
+      "http_requests": 5,
+      "decision_ms": 5222.23,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 17128,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Enter the supplied query in the Search books field without submitting it",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 3997,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.02,
+              "done_plain": 0.02,
+              "done_change": 0.02,
+              "blocked": 0.01,
+              "error_shown": 0.23,
+              "login": 0.52,
+              "irreversible": 0.89,
+              "tool": "type",
+              "p_tool": 0.89,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:search \"Search books\"",
+              "value": "query",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:search \"Search books\""
+                }
+              ],
+              "act_ms": 124
+            },
+            {
+              "round": 1,
+              "done": 0.05,
+              "done_plain": 0.05,
+              "done_change": 0.05,
+              "blocked": 0.01,
+              "error_shown": 0.65,
+              "login": 0.53,
+              "irreversible": 0.87,
+              "tool": "press_enter",
+              "p_tool": 0.86,
+              "target": 1,
+              "p_target": 0.96,
+              "el": "button \"Search\"",
+              "value": "query",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.96,
+                  "el": "button \"Search\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.04,
+                  "el": "input:search \"Search books\""
+                }
+              ],
+              "act_ms": 4
+            },
+            {
+              "round": 2,
+              "done": 0.92,
+              "done_plain": 0.92,
+              "done_change": 0.92,
+              "blocked": 0.01,
+              "error_shown": 0.67,
+              "login": 0.65,
+              "irreversible": 0.88,
+              "tool": "none",
+              "p_tool": 0.93,
+              "target": 1,
+              "p_target": 0.85,
+              "el": "button \"Search\"",
+              "value": "query",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.85,
+                  "el": "button \"Search\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.15,
+                  "el": "input:search \"Search books\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "type",
+              "element": "input:search \"Search books\"",
+              "value": "query"
+            },
+            {
+              "action": "press_enter",
+              "element": "button \"Search\""
+            }
+          ]
+        },
+        {
+          "goal": "Click the Search button to display results for the entered query",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 2178,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.01,
+              "done_plain": 0.01,
+              "done_change": 0.01,
+              "blocked": 0.01,
+              "error_shown": 0.67,
+              "login": 0.34,
+              "irreversible": 0.9,
+              "tool": "press_enter",
+              "p_tool": 0.92,
+              "target": 1,
+              "p_target": 0.99,
+              "el": "button \"Search\"",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.99,
+                  "el": "button \"Search\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.01,
+                  "el": "input:search \"Search books\""
+                }
+              ],
+              "act_ms": 3
+            },
+            {
+              "round": 1,
+              "done": 0.91,
+              "done_plain": 0.91,
+              "done_change": 0.91,
+              "blocked": 0.01,
+              "error_shown": 0.78,
+              "login": 0.72,
+              "irreversible": 0.86,
+              "tool": "none",
+              "p_tool": 0.92,
+              "target": 1,
+              "p_target": 0.98,
+              "el": "button \"Search\"",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.98,
+                  "el": "button \"Search\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.02,
+                  "el": "input:search \"Search books\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "press_enter",
+              "element": "button \"Search\""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "add-todo",
+      "repetition": 2,
+      "execution_ms": 4807.33,
+      "calls": 4,
+      "http_requests": 4,
+      "decision_ms": 3905.4,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 12743,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Enter the supplied task into the New task field without submitting it",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 2150,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.01,
+              "done_plain": 0.01,
+              "done_change": 0.01,
+              "blocked": 0.01,
+              "error_shown": 0.18,
+              "login": 0.13,
+              "irreversible": 0.66,
+              "tool": "type",
+              "p_tool": 0.93,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:text \"New task\"",
+              "value": "task",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:text \"New task\""
+                }
+              ],
+              "act_ms": 65
+            },
+            {
+              "round": 1,
+              "done": 0.91,
+              "done_plain": 0.91,
+              "done_change": 0.91,
+              "blocked": 0.01,
+              "error_shown": 0.7,
+              "login": 0.64,
+              "irreversible": 0.84,
+              "tool": "none",
+              "p_tool": 0.92,
+              "target": 0,
+              "p_target": 0.54,
+              "el": "input:text \"New task\"",
+              "value": "task",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 0.54,
+                  "el": "input:text \"New task\""
+                },
+                {
+                  "i": 1,
+                  "p": 0.46,
+                  "el": "button \"Add task\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "type",
+              "element": "input:text \"New task\"",
+              "value": "task"
+            }
+          ]
+        },
+        {
+          "goal": "Click Add task to add the entered task to the todo list",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 2238,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.02,
+              "done_plain": 0.02,
+              "done_change": 0.02,
+              "blocked": 0.01,
+              "error_shown": 0.15,
+              "login": 0.19,
+              "irreversible": 0.69,
+              "tool": "press_enter",
+              "p_tool": 0.88,
+              "target": 1,
+              "p_target": 0.99,
+              "el": "button \"Add task\"",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.99,
+                  "el": "button \"Add task\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.01,
+                  "el": "input:text \"New task\""
+                }
+              ],
+              "act_ms": 3
+            },
+            {
+              "round": 1,
+              "done": 0.93,
+              "done_plain": 0.93,
+              "done_change": 0.93,
+              "blocked": 0.01,
+              "error_shown": 0.44,
+              "login": 0.23,
+              "irreversible": 0.68,
+              "tool": "none",
+              "p_tool": 0.94,
+              "target": 1,
+              "p_target": 0.98,
+              "el": "button \"Add task\"",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.98,
+                  "el": "button \"Add task\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.02,
+                  "el": "input:text \"New task\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "press_enter",
+              "element": "button \"Add task\""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fill-field",
+      "repetition": 3,
+      "execution_ms": 2503.56,
+      "calls": 2,
+      "http_requests": 2,
+      "decision_ms": 1937.86,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 6608,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Enter the supplied email in the Email address field without submitting it",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 2086,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.01,
+              "done_plain": 0.01,
+              "done_change": 0.01,
+              "blocked": 0.01,
+              "error_shown": 0.41,
+              "login": 0.3,
+              "irreversible": 0.65,
+              "tool": "type",
+              "p_tool": 0.93,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:email \"Email address\"",
+              "value": "email",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:email \"Email address\""
+                }
+              ],
+              "act_ms": 142
+            },
+            {
+              "round": 1,
+              "done": 0.91,
+              "done_plain": 0.91,
+              "done_change": 0.91,
+              "blocked": 0.01,
+              "error_shown": 0.86,
+              "login": 0.91,
+              "irreversible": 0.92,
+              "tool": "none",
+              "p_tool": 0.92,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:email \"Email address\"",
+              "value": "email",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:email \"Email address\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "type",
+              "element": "input:email \"Email address\"",
+              "value": "email"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "checkbox",
+      "repetition": 3,
+      "execution_ms": 1936.15,
+      "calls": 2,
+      "http_requests": 2,
+      "decision_ms": 1474.73,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 5922,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Check the Subscribe to newsletter checkbox",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 1518,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.2,
+              "done_plain": 0.2,
+              "done_change": 0.2,
+              "blocked": 0.05,
+              "error_shown": 0.31,
+              "login": 0.17,
+              "irreversible": 0.88,
+              "tool": "click",
+              "p_tool": 0.45,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:checkbox \"Subscribe to newsletter\"",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:checkbox \"Subscribe to newsletter\""
+                }
+              ],
+              "act_ms": 36
+            },
+            {
+              "round": 1,
+              "done": 0.96,
+              "done_plain": 0.96,
+              "done_change": 0.96,
+              "blocked": 0.01,
+              "error_shown": 0.69,
+              "login": 0.58,
+              "irreversible": 0.88,
+              "tool": "none",
+              "p_tool": 0.96,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:checkbox \"Subscribe to newsletter\"",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:checkbox \"Subscribe to newsletter\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "click",
+              "element": "input:checkbox \"Subscribe to newsletter\""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "select-option",
+      "repetition": 3,
+      "execution_ms": 2291.82,
+      "calls": 2,
+      "http_requests": 2,
+      "decision_ms": 1852.81,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 6604,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Select Chile in the Country dropdown",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 1876,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.02,
+              "done_plain": 0.02,
+              "done_change": 0.02,
+              "blocked": 0.01,
+              "error_shown": 0.13,
+              "login": 0.11,
+              "irreversible": 0.88,
+              "tool": "select",
+              "p_tool": 0.92,
+              "target": 0,
+              "p_target": 1,
+              "el": "select \"Country\"",
+              "value": "country",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "select \"Country\""
+                }
+              ],
+              "act_ms": 16
+            },
+            {
+              "round": 1,
+              "done": 0.92,
+              "done_plain": 0.92,
+              "done_change": 0.92,
+              "blocked": 0.01,
+              "error_shown": 0.25,
+              "login": 0.58,
+              "irreversible": 0.86,
+              "tool": "none",
+              "p_tool": 0.93,
+              "target": 0,
+              "p_target": 1,
+              "el": "select \"Country\"",
+              "value": "country",
+              "elements": 1,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "select \"Country\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "select",
+              "element": "select \"Country\"",
+              "option": "Chile",
+              "value": "country"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "search",
+      "repetition": 3,
+      "execution_ms": 6616.68,
+      "calls": 5,
+      "http_requests": 5,
+      "decision_ms": 5242.12,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 17128,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Enter the supplied query in the Search books field without submitting it",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 4015,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.02,
+              "done_plain": 0.02,
+              "done_change": 0.02,
+              "blocked": 0.01,
+              "error_shown": 0.23,
+              "login": 0.52,
+              "irreversible": 0.89,
+              "tool": "type",
+              "p_tool": 0.89,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:search \"Search books\"",
+              "value": "query",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:search \"Search books\""
+                }
+              ],
+              "act_ms": 125
+            },
+            {
+              "round": 1,
+              "done": 0.05,
+              "done_plain": 0.05,
+              "done_change": 0.05,
+              "blocked": 0.01,
+              "error_shown": 0.65,
+              "login": 0.53,
+              "irreversible": 0.87,
+              "tool": "press_enter",
+              "p_tool": 0.86,
+              "target": 1,
+              "p_target": 0.96,
+              "el": "button \"Search\"",
+              "value": "query",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.96,
+                  "el": "button \"Search\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.04,
+                  "el": "input:search \"Search books\""
+                }
+              ],
+              "act_ms": 4
+            },
+            {
+              "round": 2,
+              "done": 0.92,
+              "done_plain": 0.92,
+              "done_change": 0.92,
+              "blocked": 0.01,
+              "error_shown": 0.67,
+              "login": 0.65,
+              "irreversible": 0.88,
+              "tool": "none",
+              "p_tool": 0.93,
+              "target": 1,
+              "p_target": 0.85,
+              "el": "button \"Search\"",
+              "value": "query",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.85,
+                  "el": "button \"Search\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.15,
+                  "el": "input:search \"Search books\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "type",
+              "element": "input:search \"Search books\"",
+              "value": "query"
+            },
+            {
+              "action": "press_enter",
+              "element": "button \"Search\""
+            }
+          ]
+        },
+        {
+          "goal": "Click the Search button to display results for the entered query",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 2182,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.01,
+              "done_plain": 0.01,
+              "done_change": 0.01,
+              "blocked": 0.01,
+              "error_shown": 0.67,
+              "login": 0.34,
+              "irreversible": 0.9,
+              "tool": "press_enter",
+              "p_tool": 0.92,
+              "target": 1,
+              "p_target": 0.99,
+              "el": "button \"Search\"",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.99,
+                  "el": "button \"Search\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.01,
+                  "el": "input:search \"Search books\""
+                }
+              ],
+              "act_ms": 3
+            },
+            {
+              "round": 1,
+              "done": 0.91,
+              "done_plain": 0.91,
+              "done_change": 0.91,
+              "blocked": 0.01,
+              "error_shown": 0.78,
+              "login": 0.72,
+              "irreversible": 0.86,
+              "tool": "none",
+              "p_tool": 0.92,
+              "target": 1,
+              "p_target": 0.98,
+              "el": "button \"Search\"",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.98,
+                  "el": "button \"Search\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.02,
+                  "el": "input:search \"Search books\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "press_enter",
+              "element": "button \"Search\""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "add-todo",
+      "repetition": 3,
+      "execution_ms": 4817.97,
+      "calls": 4,
+      "http_requests": 4,
+      "decision_ms": 3911.81,
+      "input_tokens": null,
+      "output_tokens": null,
+      "request_chars": 12743,
+      "verified": true,
+      "false_done": false,
+      "steps": [
+        {
+          "goal": "Enter the supplied task into the New task field without submitting it",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 2153,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.01,
+              "done_plain": 0.01,
+              "done_change": 0.01,
+              "blocked": 0.01,
+              "error_shown": 0.18,
+              "login": 0.13,
+              "irreversible": 0.66,
+              "tool": "type",
+              "p_tool": 0.93,
+              "target": 0,
+              "p_target": 1,
+              "el": "input:text \"New task\"",
+              "value": "task",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 1,
+                  "el": "input:text \"New task\""
+                }
+              ],
+              "act_ms": 65
+            },
+            {
+              "round": 1,
+              "done": 0.91,
+              "done_plain": 0.91,
+              "done_change": 0.91,
+              "blocked": 0.01,
+              "error_shown": 0.7,
+              "login": 0.64,
+              "irreversible": 0.84,
+              "tool": "none",
+              "p_tool": 0.92,
+              "target": 0,
+              "p_target": 0.54,
+              "el": "input:text \"New task\"",
+              "value": "task",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 0,
+                  "p": 0.54,
+                  "el": "input:text \"New task\""
+                },
+                {
+                  "i": 1,
+                  "p": 0.46,
+                  "el": "button \"Add task\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "type",
+              "element": "input:text \"New task\"",
+              "value": "task"
+            }
+          ]
+        },
+        {
+          "goal": "Click Add task to add the entered task to the todo list",
+          "status": "done",
+          "truth": true,
+          "ok": true,
+          "ms": 2245,
+          "rounds": [
+            {
+              "round": 0,
+              "done": 0.02,
+              "done_plain": 0.02,
+              "done_change": 0.02,
+              "blocked": 0.01,
+              "error_shown": 0.15,
+              "login": 0.19,
+              "irreversible": 0.69,
+              "tool": "press_enter",
+              "p_tool": 0.88,
+              "target": 1,
+              "p_target": 0.99,
+              "el": "button \"Add task\"",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.99,
+                  "el": "button \"Add task\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.01,
+                  "el": "input:text \"New task\""
+                }
+              ],
+              "act_ms": 4
+            },
+            {
+              "round": 1,
+              "done": 0.93,
+              "done_plain": 0.93,
+              "done_change": 0.93,
+              "blocked": 0.01,
+              "error_shown": 0.44,
+              "login": 0.23,
+              "irreversible": 0.68,
+              "tool": "none",
+              "p_tool": 0.94,
+              "target": 1,
+              "p_target": 0.98,
+              "el": "button \"Add task\"",
+              "elements": 2,
+              "stages": 1,
+              "candidates": [
+                {
+                  "i": 1,
+                  "p": 0.98,
+                  "el": "button \"Add task\""
+                },
+                {
+                  "i": 0,
+                  "p": 0.02,
+                  "el": "input:text \"New task\""
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "action": "press_enter",
+              "element": "button \"Add task\""
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "requests": [
+    {
+      "phase": "warmup",
+      "task": null,
+      "request_chars": 150,
+      "http_status": 200,
+      "inference_ms": 94.8,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 98.77
+    },
+    {
+      "phase": "measurement",
+      "task": "fill-field:1",
+      "request_chars": 3181,
+      "http_status": 200,
+      "inference_ms": 810.2,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 812.74
+    },
+    {
+      "phase": "measurement",
+      "task": "fill-field:1",
+      "request_chars": 3427,
+      "http_status": 200,
+      "inference_ms": 1104.3,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1106.29
+    },
+    {
+      "phase": "measurement",
+      "task": "checkbox:1",
+      "request_chars": 2848,
+      "http_status": 200,
+      "inference_ms": 646.3,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 648.28
+    },
+    {
+      "phase": "measurement",
+      "task": "checkbox:1",
+      "request_chars": 3074,
+      "http_status": 200,
+      "inference_ms": 815,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 817
+    },
+    {
+      "phase": "measurement",
+      "task": "select-option:1",
+      "request_chars": 3192,
+      "http_status": 200,
+      "inference_ms": 808.2,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 810.28
+    },
+    {
+      "phase": "measurement",
+      "task": "select-option:1",
+      "request_chars": 3412,
+      "http_status": 200,
+      "inference_ms": 1027.7,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1029.54
+    },
+    {
+      "phase": "measurement",
+      "task": "search:1",
+      "request_chars": 3337,
+      "http_status": 200,
+      "inference_ms": 894.2,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 896.46
+    },
+    {
+      "phase": "measurement",
+      "task": "search:1",
+      "request_chars": 3592,
+      "http_status": 200,
+      "inference_ms": 1175.5,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1177.84
+    },
+    {
+      "phase": "measurement",
+      "task": "search:1",
+      "request_chars": 4024,
+      "http_status": 200,
+      "inference_ms": 1383.2,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1385.28
+    },
+    {
+      "phase": "measurement",
+      "task": "search:1",
+      "request_chars": 3052,
+      "http_status": 200,
+      "inference_ms": 822.3,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 823.79
+    },
+    {
+      "phase": "measurement",
+      "task": "search:1",
+      "request_chars": 3123,
+      "http_status": 200,
+      "inference_ms": 935,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 936.78
+    },
+    {
+      "phase": "measurement",
+      "task": "add-todo:1",
+      "request_chars": 3231,
+      "http_status": 200,
+      "inference_ms": 890.2,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 892.14
+    },
+    {
+      "phase": "measurement",
+      "task": "add-todo:1",
+      "request_chars": 3430,
+      "http_status": 200,
+      "inference_ms": 1176.9,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1178.7
+    },
+    {
+      "phase": "measurement",
+      "task": "add-todo:1",
+      "request_chars": 2919,
+      "http_status": 200,
+      "inference_ms": 829,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 830.52
+    },
+    {
+      "phase": "measurement",
+      "task": "add-todo:1",
+      "request_chars": 3163,
+      "http_status": 200,
+      "inference_ms": 987.9,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 989.71
+    },
+    {
+      "phase": "measurement",
+      "task": "fill-field:2",
+      "request_chars": 3181,
+      "http_status": 200,
+      "inference_ms": 817.5,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 818.96
+    },
+    {
+      "phase": "measurement",
+      "task": "fill-field:2",
+      "request_chars": 3427,
+      "http_status": 200,
+      "inference_ms": 1113.5,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1114.97
+    },
+    {
+      "phase": "measurement",
+      "task": "checkbox:2",
+      "request_chars": 2848,
+      "http_status": 200,
+      "inference_ms": 653.3,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 655.1
+    },
+    {
+      "phase": "measurement",
+      "task": "checkbox:2",
+      "request_chars": 3074,
+      "http_status": 200,
+      "inference_ms": 815.2,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 816.82
+    },
+    {
+      "phase": "measurement",
+      "task": "select-option:2",
+      "request_chars": 3192,
+      "http_status": 200,
+      "inference_ms": 812.2,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 813.99
+    },
+    {
+      "phase": "measurement",
+      "task": "select-option:2",
+      "request_chars": 3412,
+      "http_status": 200,
+      "inference_ms": 1035.4,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1036.83
+    },
+    {
+      "phase": "measurement",
+      "task": "search:2",
+      "request_chars": 3337,
+      "http_status": 200,
+      "inference_ms": 896.8,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 898.21
+    },
+    {
+      "phase": "measurement",
+      "task": "search:2",
+      "request_chars": 3592,
+      "http_status": 200,
+      "inference_ms": 1176.3,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1177.71
+    },
+    {
+      "phase": "measurement",
+      "task": "search:2",
+      "request_chars": 4024,
+      "http_status": 200,
+      "inference_ms": 1378.6,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1379.97
+    },
+    {
+      "phase": "measurement",
+      "task": "search:2",
+      "request_chars": 3052,
+      "http_status": 200,
+      "inference_ms": 825,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 826.4
+    },
+    {
+      "phase": "measurement",
+      "task": "search:2",
+      "request_chars": 3123,
+      "http_status": 200,
+      "inference_ms": 938.5,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 939.94
+    },
+    {
+      "phase": "measurement",
+      "task": "add-todo:2",
+      "request_chars": 3231,
+      "http_status": 200,
+      "inference_ms": 895.9,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 897.32
+    },
+    {
+      "phase": "measurement",
+      "task": "add-todo:2",
+      "request_chars": 3430,
+      "http_status": 200,
+      "inference_ms": 1180.4,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1181.82
+    },
+    {
+      "phase": "measurement",
+      "task": "add-todo:2",
+      "request_chars": 2919,
+      "http_status": 200,
+      "inference_ms": 831.5,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 832.91
+    },
+    {
+      "phase": "measurement",
+      "task": "add-todo:2",
+      "request_chars": 3163,
+      "http_status": 200,
+      "inference_ms": 991.5,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 993.35
+    },
+    {
+      "phase": "measurement",
+      "task": "fill-field:3",
+      "request_chars": 3181,
+      "http_status": 200,
+      "inference_ms": 819.7,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 821.42
+    },
+    {
+      "phase": "measurement",
+      "task": "fill-field:3",
+      "request_chars": 3427,
+      "http_status": 200,
+      "inference_ms": 1114.9,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1116.44
+    },
+    {
+      "phase": "measurement",
+      "task": "checkbox:3",
+      "request_chars": 2848,
+      "http_status": 200,
+      "inference_ms": 652.2,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 653.72
+    },
+    {
+      "phase": "measurement",
+      "task": "checkbox:3",
+      "request_chars": 3074,
+      "http_status": 200,
+      "inference_ms": 819.5,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 821.01
+    },
+    {
+      "phase": "measurement",
+      "task": "select-option:3",
+      "request_chars": 3192,
+      "http_status": 200,
+      "inference_ms": 814,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 815.47
+    },
+    {
+      "phase": "measurement",
+      "task": "select-option:3",
+      "request_chars": 3412,
+      "http_status": 200,
+      "inference_ms": 1035.8,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1037.34
+    },
+    {
+      "phase": "measurement",
+      "task": "search:3",
+      "request_chars": 3337,
+      "http_status": 200,
+      "inference_ms": 898.8,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 900.53
+    },
+    {
+      "phase": "measurement",
+      "task": "search:3",
+      "request_chars": 3592,
+      "http_status": 200,
+      "inference_ms": 1181.6,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1183.35
+    },
+    {
+      "phase": "measurement",
+      "task": "search:3",
+      "request_chars": 4024,
+      "http_status": 200,
+      "inference_ms": 1385.3,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1387.06
+    },
+    {
+      "phase": "measurement",
+      "task": "search:3",
+      "request_chars": 3052,
+      "http_status": 200,
+      "inference_ms": 827.8,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 829.21
+    },
+    {
+      "phase": "measurement",
+      "task": "search:3",
+      "request_chars": 3123,
+      "http_status": 200,
+      "inference_ms": 940.5,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 941.97
+    },
+    {
+      "phase": "measurement",
+      "task": "add-todo:3",
+      "request_chars": 3231,
+      "http_status": 200,
+      "inference_ms": 896.2,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 897.68
+    },
+    {
+      "phase": "measurement",
+      "task": "add-todo:3",
+      "request_chars": 3430,
+      "http_status": 200,
+      "inference_ms": 1180.9,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 1182.49
+    },
+    {
+      "phase": "measurement",
+      "task": "add-todo:3",
+      "request_chars": 2919,
+      "http_status": 200,
+      "inference_ms": 834.4,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 836.08
+    },
+    {
+      "phase": "measurement",
+      "task": "add-todo:3",
+      "request_chars": 3163,
+      "http_status": 200,
+      "inference_ms": 994.2,
+      "input_tokens": null,
+      "output_tokens": null,
+      "client_ms": 995.56
+    }
+  ]
+}

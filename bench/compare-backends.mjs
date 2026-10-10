@@ -17,6 +17,7 @@ const option = (name, fallback) => {
 const repetitions = Number(option('--repetitions', '3'));
 if (!Number.isInteger(repetitions) || repetitions < 1) throw new Error('Repetitions must be a positive integer');
 const headed = process.argv.includes('--headed');
+const allowIrreversible = process.argv.includes('--allow-irreversible');
 const backends = option('--backend', 'jev,laya').split(',');
 if (backends.some(backend => !['jev', 'laya'].includes(backend)) || !backends.length) {
   throw new Error('--backend must be jev, laya, or jev,laya');
@@ -89,7 +90,7 @@ async function runWorker() {
           await browser.open(`${option('--base-url')}/${id}`);
           for (const step of flow.steps) {
             const r = await browser.do(step.goal, { values: step.values ?? {}, maxActions: step.maxActions,
-              log: s => console.log(`[${BACKEND}/${currentTask}] ${s}`) });
+              allowIrreversible, log: s => console.log(`[${BACKEND}/${currentTask}] ${s}`) });
             await browser.settle();
             const truth = await browser.page.evaluate(`(${step.assert})()`);
             const ok = ['done', 'likely_done'].includes(r.status) && truth === true;
@@ -120,7 +121,8 @@ async function runWorker() {
   finally { if (browser) await browser.close(); globalThis.fetch = originalFetch; save(); }
   function save() {
     writeFileSync(`${out}-${worker}.json`, JSON.stringify({ backend: BACKEND, endpoint: API_URL,
-      model: MODEL, health, repetitions, error, elapsed_ms: round(performance.now() - started), results, requests }, null, 2));
+      model: MODEL, health, repetitions, headed, allow_irreversible: allowIrreversible,
+      error, elapsed_ms: round(performance.now() - started), results, requests }, null, 2));
   }
 }
 
@@ -145,7 +147,7 @@ async function compare() {
       await new Promise((resolve, reject) => {
         const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--worker', backend,
           '--repetitions', String(repetitions), '--base-url', base, '--out', out,
-          ...(headed ? ['--headed'] : [])], {
+          ...(headed ? ['--headed'] : []), ...(allowIrreversible ? ['--allow-irreversible'] : [])], {
           cwd: ROOT, stdio: 'inherit', env: { ...process.env, JEV_BACKEND: backend, JEV_API_URL: endpoint,
             JEV_MODEL: model, JEV_CACHE: '0' },
         });
@@ -169,8 +171,8 @@ function markdown(report) {
   const repetitions = report.runs[0]?.repetitions;
   const lines = ['# Comparación de Jev y Laya', '', `Fecha UTC: ${report.date}`, '',
     '## Metodología', '',
-    `- Cinco ejemplos locales idénticos, ${repetitions} repeticiones por backend; orden: ${backends.join(', ')}.`,
-    `- Ejecución secuencial, contexto nuevo por ejemplo, navegador ${headed ? 'visible (headed)' : 'headless'} y caché desactivada.`,
+    `- Cinco ejemplos locales idénticos, ${repetitions} repeticiones por backend; orden: ${report.runs.map(run => run.backend).join(', ')}.`,
+    '- Ejecución secuencial, contexto nuevo por ejemplo y caché desactivada.',
     '- Una consulta de calentamiento por backend, excluida de las tablas de tareas; se informa su consumo por separado.',
     '- Verificación determinista del DOM después de cada paso. Se distingue objetivo logrado en el DOM de éxito confirmado por DOM + estado done/likely_done.',
     '- Latencia de decisión: petición HTTP completa medida por el cliente, incluyendo red, inferencia y lectura de respuesta. No es inferencia pura.',
@@ -201,6 +203,7 @@ function markdown(report) {
   for (const run of report.runs) {
     const warmup = run.requests.filter(s => s.phase === 'warmup');
     lines.push(`### ${run.backend}`, '', `- Modelo: \`${run.model}\`; endpoint: \`${run.endpoint}\`.`,
+      `- Navegador: ${run.headed ? 'visible (headed)' : 'headless'}; allow_irreversible: **${run.allow_irreversible === true}**.`,
       `- Tiempo completo del proceso: ${fmt(run.elapsed_ms / 1000)} s (incluye calentamiento y creación/cierre de contextos).`,
       `- Calentamiento: ${warmup.length} consultas, ${fmt(sum(warmup.map(s => s.client_ms)))} ms; tokens de entrada: ${fmt(tokenTotal(warmup, 'input_tokens'))}.`,
       `- Consumo del proceso completo (incluye calentamiento): entrada ${fmt(tokenTotal(run.requests, 'input_tokens'))}, salida ${fmt(tokenTotal(run.requests, 'output_tokens'))} tokens.`,
