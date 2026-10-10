@@ -1,15 +1,16 @@
 # laya-browser
 
-Fork of [jev-browser](https://github.com/Ying-Kai-Liao/jev-browser), maintained as **laya-browser** with support for the local Laya backend. The original MIT license and attribution are preserved.
+**laya-browser** is a fork of [jev-browser](https://github.com/Ying-Kai-Liao/jev-browser) that uses **Laya as its local decision system** for browser automation. It preserves the original project's browser automation architecture, MIT license, and attribution.
 
-Browser automation where an LLM plans and **Laya or Jev** decides.
+Browser automation where an LLM plans, **Laya decides**, and Playwright acts.
 
-> Unofficial project, not affiliated with TypeSafe. It calls the TypeSafe System One API
-> with your own API key.
+Configure `JEV_BACKEND=laya` to use the local decision system, without a TypeSafe API key.
+The original Jev backend remains available for compatibility; an unconfigured installation
+still selects `jev`. See [Local Laya backend](#local-laya-backend-cpu-or-cuda) for setup.
 
 The calling LLM (Claude, via MCP) says what outcome it wants, one step at a time, and hands
-over any text to type. For each round of a step, code describes the page. Then one ~300 ms
-[Typesafe System One](https://docs.typesafe.ai) request asks Jev several questions at once:
+over any text to type. For each round of a step, code describes the page. The local Laya
+decision system evaluates the next operation and target, along with auxiliary questions:
 which element, which action, which value, and is the step done / blocked / showing an error /
 about to do something irreversible. Playwright performs the action. The LLM never reads page
 snapshots unless it chooses to take over.
@@ -19,18 +20,22 @@ Claude ── browser_do("Log in", {email, password}) ──▶ laya-browser
                                                        │  loop until done / stuck / needs confirmation
                                                        │   1. settle   (network + DOM quiet)
                                                        │   2. describe (elements, labels, state, visible text, diff, counts)
-                                                       │   3. Jev      (done? error? irreversible? tool? target? value?)
+                                                       │   3. Laya     (done? error? irreversible? tool? target? value?)
                                                        │   4. act      (Playwright)
 Claude ◀── { status: "done", url, actions[], done_score } ─┘
 ```
 
 https://github.com/user-attachments/assets/2e688df9-4985-4854-8ebe-ba97c9d13d68
 
-Jev only answers with probability distributions: yes/no (`noul`), pick one option (`choice`)
+Laya answers typed questions with probability distributions: yes/no (`noul`), pick one option (`choice`)
 or a rating (`score`). It never writes text. So everything free-form comes from the caller as
 candidates, and code turns disagreement or low confidence into a status the LLM can act on.
 
-## Results
+## Results inherited from jev-browser
+
+The results below come from the original project's **Jev backend**, not from Laya.
+They document the upstream implementation; see the local Laya setup section for
+the current adapter's supported operations and verification examples.
 
 42 tasks in 16 categories on live sites (see [RESULTS.md](RESULTS.md)):
 
