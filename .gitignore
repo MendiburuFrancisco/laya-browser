@@ -11,3 +11,4 @@ __pycache__/
 .laya-cache.json
 .jev-cache.json
 .opencode/
+examples/appointment-demo.mjs
