@@ -45,6 +45,38 @@ The runner executes Jev first and Laya second, disables the decision cache, and
 checks the DOM after each step. It reports decision latency, execution time,
 request counts, and token usage when provided by the backend.
 
+### Benchmark summary: Jev vs. Laya CPU vs. Laya AMD GPU
+
+Measured on October 10, 2026: five identical local examples, three repetitions
+per configuration, headless browser, decision cache disabled, and DOM assertions.
+
+| Metric | Jev remote API | Laya local CPU | Laya local AMD GPU |
+|---|---:|---:|---:|
+| Mean decision request latency | 250.51 ms | 2,715.35 ms | 951.30 ms |
+| Median decision request latency | 236.53 ms | 2,657.69 ms | 901.28 ms |
+| P95 decision request latency | 321.81 ms | 3,458.79 ms | 1,183.91 ms |
+| Total execution time for 15 tasks | 21.38 s | 98.48 s | 40.11 s |
+| Measured decision requests | 43 | 33 | 33 |
+| Goals achieved in the DOM | 15/15 | 9/15 | 9/15 |
+| Completions confirmed by status and DOM | 12/15 | 9/15 | 9/15 |
+| Reported input / output tokens, measured tasks | 52,417 / 10,311 | Not measured | Not measured |
+
+**Local computer:** Ubuntu 22.04.5 LTS, kernel `6.8.0-138-generic`, Intel Core
+i5-11400F @ 2.60 GHz (6 cores / 12 threads), 23.31 GiB system-reported RAM, and
+AMD Radeon RX 6600 (`gfx1032`, 8 GB nominal VRAM). Node.js 24.15.0 and Python
+3.11.16 were used. CPU inference used PyTorch `2.14.1+cu130` on CPU; GPU inference
+used `2.16.0a0+rocm10.2.0a20261010` with ROCm and both models on `cuda:0`.
+
+Laya's mean request latency improved **2.85× with AMD GPU** relative to the CPU
+run. GPU execution was measured separately with a different PyTorch build. Jev's
+remote inference hardware is unknown; the local specifications describe its
+browser/client, not the TypeSafe server. Request latency includes networking and
+response processing. Laya's internal token counts are not measured, not zero.
+
+See [BENCHMARK-JEV-LAYA.md](BENCHMARK-JEV-LAYA.md) for the full hardware table,
+methodology, and interpretation, and [ROCM-AMD.md](ROCM-AMD.md) for the verified
+AMD GPU setup.
+
 ## Results inherited from jev-browser
 
 The results below come from the original project's **Jev backend**, not from Laya.
@@ -113,6 +145,11 @@ that answers typed questions without generating text.
 Requirements: **Python 3.11+**, Node.js 20+, and Internet access for the initial
 dependency installation and model download. CPU execution is supported; CUDA
 execution requires an NVIDIA GPU and a CUDA-compatible PyTorch installation.
+
+For AMD GPUs, use a compatible **ROCm build of PyTorch**. See
+[ROCM-AMD.md](ROCM-AMD.md) for the RX 6600 installation verified with this project.
+PyTorch also uses `--device cuda` for AMD ROCm; `/health` reports the actual
+accelerator and the devices of both models.
 
 From the repository root, create an isolated environment with
 [uv](https://docs.astral.sh/uv/getting-started/installation/) and install the

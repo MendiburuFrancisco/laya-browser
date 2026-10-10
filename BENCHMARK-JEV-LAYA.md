@@ -2,6 +2,65 @@
 
 Fecha UTC: 2026-10-10T21:05:10.865Z
 
+## Resumen: Jev, Laya CPU y Laya GPU
+
+Se ejecutaron los mismos cinco ejemplos con tres repeticiones por configuración:
+**15 tareas por backend**, sin caché, en modo headless y con verificación del DOM.
+La prueba de Jev y Laya CPU terminó a las 21:05 UTC; la de Laya GPU terminó a las
+21:31 UTC del 10 de octubre de 2026. Las mediciones de GPU son una ejecución
+posterior, no parte de la misma corrida de CPU.
+
+| Métrica | Jev — API remota | Laya — CPU local | Laya — AMD GPU local |
+|---|---:|---:|---:|
+| Decisión media por consulta HTTP | 250,51 ms | 2.715,35 ms | 951,30 ms |
+| Mediana | 236,53 ms | 2.657,69 ms | 901,28 ms |
+| P95 | 321,81 ms | 3.458,79 ms | 1.183,91 ms |
+| Tiempo acumulado de las 15 tareas | 21,38 s | 98,48 s | 40,11 s |
+| Consultas medidas | 43 | 33 | 33 |
+| Objetivos logrados en el DOM | 15/15 | 9/15 | 9/15 |
+| Finalizaciones confirmadas por estado y DOM | 12/15 | 9/15 | 9/15 |
+| Tokens de entrada informados — tareas medidas | 52.417 | No medidos | No medidos |
+| Tokens de salida informados — tareas medidas | 10.311 | No medidos | No medidos |
+
+La GPU redujo la latencia de Laya aproximadamente **2,85 veces** y el tiempo de
+ejecución aproximadamente **2,46 veces** respecto de la CPU. Jev mantuvo una
+latencia media aproximadamente **3,80 veces menor** que Laya GPU en estas pruebas.
+Los fallos de confirmación de Laya en casillas y búsquedas persistieron en GPU.
+
+La latencia incluye la petición HTTP completa; no es solo tiempo del kernel de
+GPU. El tiempo de tareas incluye navegación, acciones, esperas y verificaciones,
+pero excluye carga inicial de modelos, calentamiento y creación/cierre de contextos.
+Los tokens internos de Laya no están instrumentados: **no medidos no significa cero**.
+
+### Componentes y entorno de la computadora
+
+| Componente | Configuración verificada |
+|---|---|
+| Sistema operativo | Ubuntu 22.04.5 LTS, Linux x86_64 |
+| Kernel | 6.8.0-138-generic |
+| CPU | Intel Core i5-11400F, 11.ª generación, frecuencia base de 2,60 GHz |
+| Núcleos e hilos | 6 núcleos físicos, 12 hilos; frecuencia máxima anunciada de 4,40 GHz |
+| RAM reportada al sistema | 23,31 GiB de memoria total; no es una medición del consumo del benchmark |
+| GPU | AMD Radeon RX 6600, Navi 23 / RDNA 2, destino ROCm `gfx1032` |
+| VRAM | 8 GB nominales; aproximadamente 7,98 GiB utilizables reportados |
+| Driver gráfico | `amdgpu` |
+| Python | 3.11.16 |
+| Node.js | 24.15.0 |
+| Laya | 0.4.2; modelos `cklxx/laya-browser` y `convaiinnovations/laya` |
+| PyTorch de la prueba CPU | 2.14.1+cu130, ejecutado explícitamente en CPU |
+| PyTorch de la prueba GPU | 2.16.0a0+rocm10.2.0a20261010, build nightly AMD TheRock |
+| Dispositivos reales de ambos modelos en GPU | `cuda:0`, acelerador ROCm; aproximadamente 2.854,6 MiB asignados por PyTorch con ambos modelos cargados |
+
+Este equipo ejecutó el navegador y el cliente de los tres benchmarks, y la
+inferencia local de Laya. **La inferencia de Jev se ejecutó en TypeSafe; su CPU,
+GPU y RAM remotas no están disponibles en este reporte.** Las compilaciones de
+PyTorch de CPU y GPU son distintas, por lo que no se atribuye toda la diferencia
+exclusivamente al hardware.
+
+La instalación AMD y la verificación de los dispositivos reales están documentadas
+en [ROCM-AMD.md](ROCM-AMD.md). El detalle de GPU está en
+`bench/results/laya-rocm-gpu.md`, con sus muestras en los JSON correspondientes.
+
 ## Metodología
 
 - Cinco ejemplos locales idénticos, 3 repeticiones por backend; orden: Jev, luego Laya.

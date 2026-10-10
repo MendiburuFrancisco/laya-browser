@@ -7,6 +7,7 @@ bench/tasks.local.mjs
 .profile/
 *.png
 .venv/
+.venv-rocm/
 __pycache__/
 .laya-cache.json
 .jev-cache.json

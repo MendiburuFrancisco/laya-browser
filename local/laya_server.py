@@ -160,6 +160,9 @@ def main():
     parser.add_argument("--port", type=int, default=8791)
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
+    import torch
+    if args.device.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError("GPU requested but unavailable to PyTorch. Use a CUDA/ROCm-enabled environment with GPU access, or explicitly pass --device cpu.")
     import laya
     agent = laya.load(args.model, device=args.device)
     agent.cfg["max_len"] = 1024
@@ -167,6 +170,10 @@ def main():
     agent.model.encoder.config.reference_compile = False
     checks_agent = laya.load(args.checks_model, device=args.device)
     checks_agent.model.encoder.config.reference_compile = False
+    actual_device = str(next(agent.model.parameters()).device)
+    checks_device = str(next(checks_agent.model.parameters()).device)
+    if args.device.startswith("cuda") and not all(d.startswith("cuda") for d in (actual_device, checks_device)):
+        raise RuntimeError(f"GPU requested but model devices are {actual_device} and {checks_device}; refusing silent CPU fallback.")
     telemetry = {"inference_requests": 0, "inference_completed": 0, "inference_errors": 0,
                  "last_inference_ms": None, "last_inference_cpu_ms": None}
 
@@ -183,7 +190,12 @@ def main():
             if self.path != "/health":
                 return self.send_json(404, {"error": "Not found"})
             self.send_json(200, {"ok": True, "pid": os.getpid(), "model": args.model,
-                                 "checks_model": args.checks_model, "device": args.device, **telemetry})
+                                  "checks_model": args.checks_model, "device": actual_device,
+                                  "checks_device": checks_device,
+                                  "accelerator": ("rocm" if torch.version.hip else "cuda") if actual_device.startswith("cuda") else "cpu",
+                                  "gpu_name": torch.cuda.get_device_name(actual_device) if actual_device.startswith("cuda") else None,
+                                  "gpu_allocated_mb": round(torch.cuda.memory_allocated(actual_device) / 1024 ** 2, 1) if actual_device.startswith("cuda") else None,
+                                  **telemetry})
 
         def do_POST(self):
             if self.path != "/v1/systemone":
