@@ -1,6 +1,6 @@
 {
   "name": "laya-browser",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Browser automation with Laya local and Jev (Typesafe System One) decision backends. Library, CLI and MCP server.",
   "keywords": [
     "mcp",
@@ -56,6 +56,7 @@
     "examples:jev": "node bench/compare-backends.mjs --backend jev --headed --repetitions 1 --pause-ms 3000 --out bench/results/jev-examples",
     "examples:laya": "node bench/compare-backends.mjs --backend laya --headed --repetitions 1 --pause-ms 3000 --out bench/results/laya-examples",
     "mcp": "node bin/laya-browser-mcp.mjs",
+    "cost": "node bin/jev-cost.mjs",
     "setup": "npx playwright install chromium"
   },
   "engines": {

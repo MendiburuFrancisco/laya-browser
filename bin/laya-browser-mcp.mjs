@@ -12,6 +12,7 @@ import { z } from "zod";
 import { JevBrowser } from "../src/session.mjs";
 import { BACKEND, API_URL, MODEL } from "../src/jev.mjs";
 import { runPlan } from "../src/plan.mjs";
+import { formatRead } from "../src/prune.mjs";
 
 const backendInfo = { backend: BACKEND, decision_endpoint: API_URL, decision_model: MODEL };
 
@@ -50,7 +51,7 @@ const wrap = fn => async args => { try {
 } catch (e) { return fail(e); } };
 const stderrLog = process.env.JEV_BROWSER_LOG === "1" ? s => process.stderr.write(s + "\n") : () => {};
 
-const server = new McpServer({ name: "laya-browser", version: "0.1.1" });
+const server = new McpServer({ name: "laya-browser", version: "0.1.2" });
 
 server.registerTool("browser_open", {
   title: "Open URL",
@@ -143,9 +144,20 @@ server.registerTool("browser_choose", {
 
 server.registerTool("browser_snapshot", {
   title: "Page snapshot",
-  description: "Compact view of the current page: visible text and numbered interactive elements. Use it to take over when browser_do is ambiguous or stuck, then act with browser_act.",
-  inputSchema: {},
-}, wrap(async () => text(await (await browser()).snapshotText())));
+  description: [
+    "Compact view of the current page: visible text and numbered interactive elements. Use it to take over when browser_do is ambiguous or stuck, then act with browser_act.",
+    "This is the one observation you read in full, so narrow it: `diff` after an action, `filter` when you know what you are looking for, `interactive` when the page's prose does not matter.",
+    "Link targets are omitted unless `urls` is true; element numbers, not URLs, are what browser_act takes.",
+  ].join("\n"),
+  inputSchema: {
+    diff: z.boolean().optional().describe("Only what changed since the previous snapshot (falls back to a full one if there is none). Carries no element numbers: take a full snapshot to act."),
+    interactive: z.boolean().optional().describe("Drop the visible-text block and list only elements (dialog/status text is kept)"),
+    filter: z.string().optional().describe("Keep only elements whose label/text/placeholder/name/href contains this substring, case-insensitive"),
+    urls: z.boolean().optional().describe("Print href= on element lines. Default false"),
+    max_chars: z.number().int().min(200).optional().describe("Size limit of the rendered snapshot. Default 10000, capped at 20000"),
+  },
+}, wrap(async ({ diff, interactive, filter, urls, max_chars }) =>
+  text(await (await browser()).snapshotText({ diff: !!diff, interactive: !!interactive, filter: filter ?? "", urls: !!urls, maxChars: max_chars }))));
 
 server.registerTool("browser_act", {
   title: "Act on element",
@@ -176,6 +188,25 @@ server.registerTool("browser_close", {
 }, wrap(async () => {
   await closeSession();
   return text({ closed: true });
+}));
+
+server.registerTool("browser_read", {
+  title: "Read page content",
+  description: [
+    "Return the part of the current page's text that helps answer a question. Use it to READ a page; use browser_snapshot to ACT on one.",
+    "browser_snapshot only shows the text in the viewport (a long article is ~1% of its content), so this is the way to reach the rest of a document without scrolling and snapshotting it piece by piece.",
+    "Code splits the full document into blocks at headings and sections, Jev rates each block against your question, and code returns the ones that help, in document order.",
+    "Short pages come back whole with no model call. Long ones are pruned: whatever is left out is counted and marked in place with [… N blocks dropped …], never silently cut. Widen `question` or raise `max_chars` to get more back, or use browser_snapshot for the page as it normally appears.",
+    "Costs ~1 s per 50k characters of page text.",
+  ].join("\n"),
+  inputSchema: {
+    question: z.string().describe("What you want to learn from the page; blocks are kept or dropped against this"),
+    max_chars: z.number().int().min(500).max(200_000).optional().describe("Character budget for the content returned. Default 12000"),
+  },
+}, wrap(async ({ question, max_chars }) => {
+  const b = await browser();
+  const r = await b.read(question, max_chars ? { budgetChars: max_chars } : {});
+  return text(formatRead(r));
 }));
 
 const shutdown = async () => { await closeSession(); process.exit(0); };

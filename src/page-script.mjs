@@ -89,9 +89,13 @@ export const ENUMERATE = ({ start, frame }) => {
     const tag = el.tagName.toLowerCase();
     let pick = el.matches(SEL) || bound(el);
     if (!pick && !["html", "body", "label", "svg", "path"].includes(tag) && el.parentElement) {
-      // JS-bound clickables (div/span/th with a click handler) usually show a pointer cursor
+      // JS-bound clickables (div/span/th with a click handler) usually show a pointer cursor.
+      // The "not nested in a real link/button" guard below must start from the PARENT, not el
+      // itself: el only reaches this branch because it already failed SEL, so when el itself
+      // is an <a> without href or a role-less custom button (router links, styled tabs), a
+      // self-inclusive closest() disqualifies the exact element this fallback exists to catch.
       const cur = getComputedStyle(el).cursor;
-      pick = cur === "pointer" && getComputedStyle(el.parentElement).cursor !== "pointer" && !el.closest("a, button, [role=button]");
+      pick = cur === "pointer" && getComputedStyle(el.parentElement).cursor !== "pointer" && !el.parentElement.closest("a, button, [role=button]");
     }
     // table headers (often sortable) and sizeable images (hover targets, image links' content)
     if (!pick && (tag === "th" && el.closest("thead") || tag === "img" && !el.closest("a, button"))) {
@@ -108,6 +112,19 @@ export const ENUMERATE = ({ start, frame }) => {
       if (lab) hit = lab;
       else if (type === "file") hidden = true;
       else continue;
+    }
+    // visible() keeps styled checkbox/radio replacements on purpose, but the real input
+    // often cannot take the click itself: opacity:0 under its own label, or the 1px
+    // clip-rect "visually hidden" recipe with the swatch container painted on top.
+    // The label is the real control in both cases, so act on it.
+    if (hit === el && (type === "checkbox" || type === "radio")) {
+      const st = getComputedStyle(el), r = el.getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const top = cx >= 0 && cy >= 0 && cx < innerWidth && cy < innerHeight ? document.elementFromPoint(cx, cy) : null;
+      const unclickable = +st.opacity <= 0.05 || r.width <= 2 || r.height <= 2
+        || st.clip !== "auto" || st.clipPath !== "none"
+        || (top && top !== el && [...(el.labels || [])].some(l => l === top || l.contains(top)));
+      if (unclickable) { const lab = [...(el.labels || [])].find(visible); if (lab) hit = lab; }
     }
     if (seen.has(hit)) continue; seen.add(hit);
 
@@ -206,5 +223,78 @@ export const ENUMERATE = ({ start, frame }) => {
     text: seenText,
     metrics: { scroll_y: Math.round(scrollY), page_height: document.documentElement.scrollHeight, text_length: full.length },
     dialogs: dlg, elements: out, next: i,
+  };
+};
+
+
+// Runs inside each frame. The whole document's readable text, cut at structural boundaries
+// (headings, sections, list items, table rows, paragraphs) so each piece can be judged on its
+// own. ENUMERATE's `text` is viewport-only by design; this is everything a reader would scroll
+// through, which is what `browser_read` has to rank. Oversized leaves and runs of tiny blocks
+// are left for normalizeBlocks() in src/prune.mjs, so the splitting rules stay offline-testable.
+// Must stay self-contained: Playwright serialises it into the page.
+export const EXTRACT_BLOCKS = ({ maxBlock = 1200, maxChars = 400_000, frame } = {}) => {
+  const SKIP = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "SVG", "CANVAS", "IFRAME", "OBJECT", "AUDIO", "VIDEO"]);
+  const clean = s => (s || "").replace(/[ \t ]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  const blocks = [];
+  const path = [];                       // current heading path, indexed by heading level - 1
+  let chars = 0, truncated = false;
+
+  const emit = (text, tag) => {
+    if (!text) return;
+    if (chars >= maxChars) { truncated = true; return; }
+    const section = path.filter(Boolean).join(" > ");
+    blocks.push({ text, tag, ...(section ? { section } : {}), ...(frame ? { frame } : {}) });
+    chars += text.length;
+  };
+
+  const walk = el => {
+    if (chars >= maxChars) { truncated = true; return; }
+    // SVG and MathML keep their tagName's original case and have no innerText at all
+    const tag = el.tagName.toUpperCase();
+    if (SKIP.has(tag) || typeof el.innerText !== "string" || el.closest('[aria-hidden="true"], [inert]')) return;
+    // innerText falls back to textContent on an element that is not rendered, so a display:none
+    // subtree would come back as readable text even though body.innerText (and therefore
+    // metrics.text_length) leaves it out. An unrendered element has no client rects; the
+    // display:contents exception is rendered through its children and must still be walked.
+    // checkVisibility() is not usable for this: it calls MDN's <main> invisible although that
+    // element holds the whole article.
+    if (!el.getClientRects().length && getComputedStyle(el).display !== "contents") return;
+
+    const h = /^H([1-6])$/.exec(tag);
+    if (h) {
+      const t = clean(el.innerText).slice(0, 200);
+      const lvl = +h[1];
+      path.length = lvl - 1;
+      path[lvl - 1] = t;
+      emit(t, "heading");
+      return;
+    }
+    // textContent is a free size proxy; innerText (which costs layout) is only taken once we
+    // have decided this element is a block rather than a container to descend into. A small
+    // container still has to be descended into when it wraps a heading (Wikipedia puts every
+    // <h2> in its own div), otherwise the heading path never advances past the title.
+    if (el.textContent.length <= maxBlock && !el.querySelector("h1, h2, h3, h4, h5, h6")) { emit(clean(el.innerText), tag.toLowerCase()); return; }
+
+    const kids = [...el.children].filter(c => !SKIP.has(c.tagName.toUpperCase()));
+    if (!kids.length) { emit(clean(el.innerText), tag.toLowerCase()); return; }
+    // Loose text nodes between element children are content too, and would be lost otherwise.
+    let loose = "";
+    for (const n of el.childNodes) {
+      if (n.nodeType === 3) { loose += n.textContent; continue; }
+      if (n.nodeType !== 1) continue;
+      const t = clean(loose); loose = "";
+      if (t) emit(t, "text");
+      walk(n);
+    }
+    const t = clean(loose);
+    if (t) emit(t, "text");
+  };
+
+  if (document.body) walk(document.body);
+  return {
+    url: location.href, title: document.title,
+    blocks, truncated,
+    total_chars: document.body?.innerText?.length ?? 0,
   };
 };
