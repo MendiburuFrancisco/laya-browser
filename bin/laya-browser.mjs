@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// jev-browser run <flow.json> [--headed] [--json] [--allow-irreversible]
-// jev-browser do <url> "<goal>" [key=value ...] [--headed] [--allow-irreversible]
+// laya-browser run <flow.json> [--headed] [--json] [--allow-irreversible]
+// laya-browser do <url> "<goal>" [key=value ...] [--headed] [--allow-irreversible]
 import { readFileSync } from "node:fs";
 import { runFlow } from "../src/flow.mjs";
 import { JevBrowser } from "../src/session.mjs";
@@ -13,8 +13,8 @@ const allowIrreversible = flag("--allow-irreversible");
 
 const usage = () => {
   console.error(`usage:
-  jev-browser run <flow.json> [--headed] [--json] [--allow-irreversible]
-  jev-browser do <url> "<goal>" [key=value ...] [--headed] [--allow-irreversible]`);
+  laya-browser run <flow.json> [--headed] [--json] [--allow-irreversible]
+  laya-browser do <url> "<goal>" [key=value ...] [--headed] [--allow-irreversible]`);
   process.exit(2);
 };
 

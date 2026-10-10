@@ -1,4 +1,4 @@
-# jev-browser: design notes
+# laya-browser: design notes
 
 Started 2026-09-16 in Jev-playground, moved to this repo 2026-09-17. `src/session.mjs` drives a real browser. Code reads the page, Jev makes each small decision,
 Playwright acts. Claude (or any LLM) hands it one goal at a time. The benchmark is in

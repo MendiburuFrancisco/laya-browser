@@ -1,6 +1,6 @@
 # Publishes to npm when a version tag is pushed:  npm version patch && git push --follow-tags
 # Uses npm trusted publishing (OIDC), so no npm token is stored in GitHub. One-time setup:
-#   npx npm@latest trust github jev-browser --file release.yml --repo Ying-Kai-Liao/jev-browser --allow-publish
+#   npx npm@latest trust github laya-browser --file release.yml --repo MendiburuFrancisco/laya-browser --allow-publish
 name: Release
 
 on:
@@ -32,7 +32,7 @@ jobs:
       - name: Publish to npm
         run: |
           V=$(node -p 'require("./package.json").version')
-          if npm view "jev-browser@$V" version >/dev/null 2>&1; then echo "jev-browser@$V is already on npm, skipping"; else npm publish --access public; fi
+          if npm view "laya-browser@$V" version >/dev/null 2>&1; then echo "laya-browser@$V is already on npm, skipping"; else npm publish --access public; fi
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

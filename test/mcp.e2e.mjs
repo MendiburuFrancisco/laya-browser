@@ -6,7 +6,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-const server = fileURLToPath(new URL("../bin/jev-browser-mcp.mjs", import.meta.url));
+const server = fileURLToPath(new URL("../bin/laya-browser-mcp.mjs", import.meta.url));
 const client = new Client({ name: "e2e", version: "0" });
 await client.connect(new StdioClientTransport({ command: process.execPath, args: [server], env: { ...process.env } }));
 
@@ -24,7 +24,7 @@ async function call(name, args = {}) {
 
 try {
 const tools = (await client.listTools()).tools.map(t => t.name);
-assert.deepEqual(tools.sort(), ["browser_act", "browser_check", "browser_choose", "browser_close", "browser_do", "browser_open", "browser_screenshot", "browser_snapshot"]);
+assert.deepEqual(tools.sort(), ["browser_act", "browser_check", "browser_choose", "browser_close", "browser_do", "browser_open", "browser_run", "browser_screenshot", "browser_snapshot"]);
 
 await call("browser_open", { url: "https://demo.playwright.dev/todomvc/" });
 let r = await call("browser_do", { goal: "Add a todo item", values: { todo: "buy milk" } });

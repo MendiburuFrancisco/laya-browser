@@ -1,0 +1,11 @@
+{
+  "name": "Laya local: enter text without submitting",
+  "url": "https://demo.playwright.dev/todomvc/",
+  "steps": [
+    {
+      "goal": "Enter the supplied todo text into the 'What needs to be done?' field without submitting it",
+      "values": { "todo": "buy milk" },
+      "assert": "() => document.querySelector('.new-todo').value === 'buy milk' && document.querySelectorAll('.todo-list li').length === 0"
+    }
+  ]
+}

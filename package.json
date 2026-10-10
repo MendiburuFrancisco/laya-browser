@@ -1,7 +1,7 @@
 {
-  "name": "jev-browser",
+  "name": "laya-browser",
   "version": "0.1.1",
-  "description": "Browser automation where an LLM plans and Jev (Typesafe System One) makes every per-step decision. Library, CLI and MCP server.",
+  "description": "Browser automation with Laya local and Jev (Typesafe System One) decision backends. Library, CLI and MCP server.",
   "keywords": [
     "mcp",
     "mcp-server",
@@ -10,6 +10,7 @@
     "llm",
     "agent",
     "jev",
+    "laya",
     "typesafe",
     "claude"
   ],
@@ -17,11 +18,11 @@
   "author": "Ying-Kai Liao",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Ying-Kai-Liao/jev-browser.git"
+    "url": "git+https://github.com/MendiburuFrancisco/laya-browser.git"
   },
-  "homepage": "https://github.com/Ying-Kai-Liao/jev-browser#readme",
+  "homepage": "https://github.com/MendiburuFrancisco/laya-browser#readme",
   "bugs": {
-    "url": "https://github.com/Ying-Kai-Liao/jev-browser/issues"
+    "url": "https://github.com/MendiburuFrancisco/laya-browser/issues"
   },
   "type": "module",
   "main": "./src/index.mjs",
@@ -29,13 +30,17 @@
     ".": "./src/index.mjs"
   },
   "bin": {
-    "jev-browser": "bin/jev-browser.mjs",
-    "jev-browser-mcp": "bin/jev-browser-mcp.mjs"
+    "laya-browser": "bin/laya-browser.mjs",
+    "laya-browser-mcp": "bin/laya-browser-mcp.mjs"
   },
   "files": [
     "src/",
     "bin/",
     "examples/",
+    "local/*.py",
+    "local/*.mjs",
+    "local/requirements.txt",
+    "MCP-LAYA.md",
     "README.md",
     "NOTES.md",
     "RESULTS.md",
@@ -47,7 +52,7 @@
     "test:e2e": "node test/mcp.e2e.mjs",
     "bench": "node bench/run.mjs",
     "bench:cost": "node bench/context-cost.mjs",
-    "mcp": "node bin/jev-browser-mcp.mjs",
+    "mcp": "node bin/laya-browser-mcp.mjs",
     "setup": "npx playwright install chromium"
   },
   "engines": {

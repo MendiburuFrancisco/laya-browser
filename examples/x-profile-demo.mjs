@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Watch jev-browser drive x.com logged out (read-only). Headed with decision highlights.
+// Watch laya-browser drive x.com logged out (read-only). Headed with decision highlights.
 //   node examples/x-profile-demo.mjs
 // X serves a blank page to headless Chromium, so this must run headed.
 import { JevBrowser } from "../src/index.mjs";

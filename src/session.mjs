@@ -11,8 +11,9 @@
 // an option to select, or a stricter "is it done" when the answers disagree.
 import { chromium } from "playwright";
 import { jev } from "./jev.mjs";
-import { ENUMERATE } from "./page-script.mjs";
+import { ENUMERATE, TRACK_INTERACTIONS } from "./page-script.mjs";
 import { FIELDISH, SELECTISH, FILEISH, brief, pageDiff, repeatedElements, formatPage } from "./page-model.mjs";
+import { LocatorCache, cacheKey } from "./locator-cache.mjs";
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -78,9 +79,11 @@ export class JevBrowser {
       if (/Executable doesn't exist|browserType\.launch/i.test(String(e.message)) && /install/i.test(String(e.message))) throw new Error("Chromium for Playwright is not installed. Run: npx playwright install chromium");
       throw e;
     }
+    await context.addInitScript(TRACK_INTERACTIONS);
     const b = new JevBrowser(browser, context, own);
     b.highlight = highlight;
     b.page = context.pages()[0] ?? await context.newPage();
+    await b.page.evaluate(TRACK_INTERACTIONS);
     return b;
   }
 
@@ -90,6 +93,9 @@ export class JevBrowser {
     this.shown = null;               // the page whose element numbers the caller last saw
     this.dialogPolicy = SAFE_DIALOGS;
     this.stats = { calls: 0, jev_ms: 0, tokens: 0 };
+    // Persisted decisions: replay cached actions without calling Jev (JEV_CACHE=0 disables)
+    this.cache = process.env.JEV_CACHE === "0" ? null
+      : new LocatorCache(process.env.JEV_CACHE_FILE || ".laya-cache.json");
     context.addInitScript(() => {
       window.__jevMut = performance.now();
       const mo = new MutationObserver(recs => { if (recs.some(r => r.attributeName !== "data-jev-i")) window.__jevMut = performance.now(); });
@@ -363,12 +369,49 @@ export class JevBrowser {
     const t0 = Date.now(); const calls0 = this.stats.calls;
     const history = []; const rounds = [];
     let prevPage = null, waits = 0, page = null, status = "max_actions", info, pending, retried = false;
+    let cacheHits = 0, cacheSaved = 0;
     const seen = new Map();
     this.promptText = values.prompt;
     for (let round = 0; round <= maxActions; round++) {
       await this.settle();
       page = await this.snapshot();
       if (this.events.length) history.push(...this.events.splice(0).map(e => ({ event: e })));
+
+      // Cache fast path: a persisted decision for (goal, url, round) replays without a Jev
+      // call. Validated against the fresh snapshot: the stored XPath must map to exactly one
+      // enumerated element in the same frame, with the same brief, and any value it types
+      // must be available. On mismatch the entry is evicted and Jev decides (self-healing).
+      const ck = this.cache && round < maxActions ? cacheKey(goal, page.url, round) : null;
+      const cached = ck ? this.cache.get(ck) : null;
+      if (cached) {
+        const el = page.elements.find(e => e.xpath && e.xpath === cached.xpath && (e.frame ?? null) === (cached.frame ?? null));
+        const briefOk = el && brief(el) === cached.brief;
+        const needsValue = ["type", "upload"].includes(cached.tool);
+        const valueOk = !needsValue || (cached.valueKey != null && values[cached.valueKey] != null);
+        if (el && briefOk && valueOk) {
+          const act = { tool: cached.tool, target: el.i, el, valueKey: cached.valueKey, value: cached.valueKey != null ? values[cached.valueKey] : cached.option, p_tool: 1, p_target: 1, candidates: [] };
+          const r = { round, cached: true, tool: act.tool, p_tool: 1, target: act.target, p_target: 1, el: brief(act.el), value: act.valueKey, elements: page.elements.length };
+          rounds.push(r); cacheHits++;
+          log(`  r${round}: [cache] ${act.tool} -> #${act.target} ${r.el}${act.valueKey ? ` value=${act.valueKey}` : ""}`);
+          const h = { action: act.tool, element: brief(act.el) };
+          if (act.valueKey && ["type", "select", "upload"].includes(act.tool)) h.value = act.valueKey;
+          if (act.tool === "select" && act.value != null) h.option = act.value;
+          if (this.highlight && act.target != null) await this.showDecision(act, r).catch(() => {});
+          try { r.act_ms = await this.act(act); }
+          catch (e) { h.error = actionError(e); r.error = h.error; this.cache.evict(ck); log(`  ! ${h.error} (cache entry evicted)`); }
+          history.push(h);
+          if (this.heldDialog) {
+            this.cache.evict(ck);
+            status = "needs_confirmation"; info = "the cached action opened a confirmation dialog that looks hard to undo, so it was dismissed; call again with allow_irreversible to accept it";
+            pending = { action: h.action, element: h.element, dialog: this.heldDialog.message, p_irreversible: this.heldDialog.p_irreversible };
+            break;
+          }
+          prevPage = page;
+          continue;
+        }
+        this.cache.evict(ck);
+      }
+
       const a = await this.decide(page, goal, values, history.slice(-12), round ? pageDiff(prevPage, page) : undefined);
       prevPage = page;
       const act = this.resolve(page, a, values);
@@ -455,6 +498,19 @@ export class JevBrowser {
       try { r.act_ms = await this.act(act); }
       catch (e) { h.error = actionError(e); r.error = h.error; log(`  ! ${h.error}`); }
       history.push(h);
+      // Persist this decision so the next run of the same goal replays it without Jev.
+      // Irreversible actions are never cached (Jev re-checks them each run) and neither
+      // are secrets: only the valueKey name is stored, never the value.
+      if (this.cache && ck && !h.error && !this.heldDialog && act.el?.xpath
+          && ["click", "type", "press_enter", "select", "hover", "right_click", "upload"].includes(act.tool)
+          && (a.irreversible?.noul ?? 0) < irreversibleAt) {
+        this.cache.put(ck, {
+          tool: act.tool, xpath: act.el.xpath, frame: act.el.frame ?? null, brief: brief(act.el),
+          ...(act.valueKey && ["type", "select", "upload"].includes(act.tool) ? { valueKey: act.valueKey } : {}),
+          ...(act.tool === "select" && act.value != null ? { option: act.value } : {}),
+        });
+        cacheSaved++;
+      }
       if (this.heldDialog) {
         status = "needs_confirmation"; info = "the action opened a confirmation dialog that looks hard to undo, so it was dismissed; call again with allow_irreversible to accept it";
         pending = { action: h.action, element: h.element, dialog: this.heldDialog.message, p_irreversible: this.heldDialog.p_irreversible };
@@ -464,6 +520,7 @@ export class JevBrowser {
     this.shown = page;
     if (this.events.length) history.push(...this.events.splice(0).map(e => ({ event: e })));
     const out = { status, goal, url: this.page.url(), title: await this.page.title().catch(() => ""), actions: history, rounds, jev_calls: this.stats.calls - calls0, ms: Date.now() - t0 };
+    if (cacheHits || cacheSaved) out.cache = { hits: cacheHits, saved: cacheSaved };
     if (info) out.info = info;
     if (pending) out.pending = pending;
     out.done_score = +(rounds.at(-1)?.done ?? 0);

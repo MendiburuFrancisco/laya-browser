@@ -68,12 +68,12 @@ Logins, form submits, "Add to cart", "Checkout", "Continue", upload and drag nev
 ## Page content the calling LLM reads (estimate)
 
 Playwright-MCP style = one AI aria snapshot (`page.ariaSnapshot({mode: "ai"})`) of the task's
-start page per action, plus the initial one. jev-browser = the `browser_do` results. Tokens ≈ characters / 4.
+start page per action, plus the initial one. laya-browser = the `browser_do` results. Tokens ≈ characters / 4.
 
 | | total over 40 tasks (r6) | median task |
 |---|---|---|
 | Playwright-MCP style, to the LLM | ≈557k tokens | — |
-| jev-browser, to the LLM | ≈8.3k tokens | 5.4× less |
+| laya-browser, to the LLM | ≈8.3k tokens | 5.4× less |
 | read by Jev instead | ≈602k tokens | |
 
 The gap comes from big pages: Wikipedia link (≈149k-token snapshot, ~2,300×), GitHub (~270×),

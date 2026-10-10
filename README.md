@@ -1,6 +1,8 @@
-# jev-browser
+# laya-browser
 
-Browser automation where an LLM plans and **Jev** decides.
+Fork of [jev-browser](https://github.com/Ying-Kai-Liao/jev-browser), maintained as **laya-browser** with support for the local Laya backend. The original MIT license and attribution are preserved.
+
+Browser automation where an LLM plans and **Laya or Jev** decides.
 
 > Unofficial project, not affiliated with TypeSafe. It calls the TypeSafe System One API
 > with your own API key.
@@ -13,7 +15,7 @@ about to do something irreversible. Playwright performs the action. The LLM neve
 snapshots unless it chooses to take over.
 
 ```
-Claude ── browser_do("Log in", {email, password}) ──▶ jev-browser
+Claude ── browser_do("Log in", {email, password}) ──▶ laya-browser
                                                        │  loop until done / stuck / needs confirmation
                                                        │   1. settle   (network + DOM quiet)
                                                        │   2. describe (elements, labels, state, visible text, diff, counts)
@@ -47,6 +49,11 @@ replacements), dynamic loading, modals, JS dialogs, hover, right-click, drag and
 presses, file upload, iframes, shadow DOM, new tabs, pages with 2,000+ elements (two-stage
 selection), and non-English UIs.
 
+Element discovery includes DOM event properties (`element.onclick`), React event
+props, and direct native listeners registered after browser startup. This also
+detects custom sidebar/card controls whose pointer cursor appears only on hover,
+without requiring a prior mouse movement. Hidden/inert controls stay excluded.
+
 Known limits, so write steps around them:
 - **Ordered sub-goals in one step** ("add two todos, complete one, clear completed") → split
   into one outcome per step.
@@ -58,16 +65,16 @@ Known limits, so write steps around them:
 
 ```bash
 npx playwright install chromium          # once
-claude mcp add jev-browser -e TYPESAFE_API_KEY=your-key -- npx -y -p jev-browser jev-browser-mcp
+claude mcp add laya-browser -e TYPESAFE_API_KEY=your-key -- npx -y -p laya-browser laya-browser-mcp
 ```
 
-Any MCP client works the same way: command `npx`, args `-y -p jev-browser jev-browser-mcp`,
+Any MCP client works the same way: command `npx`, args `-y -p laya-browser laya-browser-mcp`,
 env `TYPESAFE_API_KEY`. Add `JEV_BROWSER_HEADED=1` to watch it work.
 
 ## Setup (from source)
 
 ```bash
-git clone https://github.com/Ying-Kai-Liao/jev-browser && cd jev-browser
+git clone https://github.com/MendiburuFrancisco/laya-browser && cd laya-browser
 npm install
 npm run setup                    # downloads Chromium for Playwright
 cp .env.example .env             # add TYPESAFE_API_KEY
@@ -75,18 +82,74 @@ npm test                         # offline tests (no network, no key)
 npm run test:e2e                 # MCP server end to end (network + key)
 ```
 
+### Local Laya backend (CPU or CUDA)
+
+Install Python dependencies in an isolated environment (Python 3.11+):
+
+```bash
+uv venv --python 3.11 .venv
+uv pip install --python .venv/bin/python -r local/requirements.txt
+.venv/bin/python local/laya_server.py --device cpu
+```
+
+The first launch downloads `cklxx/laya-browser` and `convaiinnovations/laya` from Hugging Face. Subsequent
+launches reuse the downloaded checkpoint. Use `--device cuda` for an NVIDIA GPU,
+or `--model /absolute/path/to/checkpoint` to load a local copy.
+
+In a second terminal, run the browser against the local server:
+
+```bash
+JEV_BACKEND=laya JEV_CACHE=0 node bin/laya-browser.mjs run examples/flows/laya-smoke.json --headed
+```
+
+For MCP, set `JEV_BACKEND=laya` in the server environment or in the repository's
+`.env`. No TypeSafe API key is required. `JEV_API_URL` overrides the default
+`http://127.0.0.1:8791/v1/systemone`. Check readiness at `/health`.
+Use a separate `JEV_CACHE_FILE=.laya-cache.json` when enabling the decision cache
+to avoid replaying decisions previously made by Jev.
+
+The adapter preserves this project's page/task schema, supplies descriptions for
+element and group choices, and splits choices wider than 60 candidates. The browser
+checkpoint chooses CLICK, TYPE_TEXT, SELECT, PRESS_ENTER, SCROLL_DOWN, WAIT, DONE
+and BLOCKED in an operation-specific target layout. General Laya handles auxiliary
+typed questions (values, checks, login, error, irreversible actions, and group
+selection); the browser checkpoint's yes/no head saturated during initial testing.
+Both checkpoints run locally. `--checks-model` selects a different general checkpoint.
+Hover, drag, right-click, upload and other keyboard actions remain available through
+manual `browser_act`; the local browser policy does not propose those operations.
+This is a different question format from the model's original jev-ultrafast
+evaluation harness; its published benchmark scores do not apply to this adapter.
+The model may stop early or request confirmation on benign actions; verify results
+with page assertions. The existing multi-step TodoMVC flow is not a passing Laya
+benchmark. `laya-smoke.json` is a small field-entry example with a DOM assertion.
+The browser still receives strings to type through `values`, so no additional
+text-generation model is needed. The default backend remains `jev`.
+
+### Monitor Laya resources
+
+On Linux, with the Laya server running, launch a dashboard that graphs only the
+server process (CPU and resident RAM), sampled every second:
+
+```bash
+node local/monitor-laya.mjs
+```
+
+Open the printed `http://127.0.0.1:8792` URL in a browser. CPU is expressed as a
+percentage of one core; the graphs show the most recent 90 seconds.
+
 ### Use from Claude Code (MCP, from source)
 
 ```bash
-claude mcp add jev-browser -- node /absolute/path/to/jev-browser/bin/jev-browser-mcp.mjs
+claude mcp add laya-browser -- node /absolute/path/to/laya-browser/bin/laya-browser-mcp.mjs
 ```
 
 From a source checkout the server reads `TYPESAFE_API_KEY` from the repo's `.env`.
 
 | tool | purpose |
 |---|---|
-| `browser_open(url)` | navigate and wait for the page to settle |
+| `browser_open(url, viewport?)` | navigate and wait; viewport object fixes resolution, null follows window size |
 | `browser_do(goal, values?, max_actions?, allow_irreversible?, explain?)` | work toward one outcome; returns a status |
+| `browser_run(steps, url?, viewport?)` | run an ordered plan locally; return only on completion or the first problem |
 | `browser_check(question)` | yes/no about the page → `p_yes` |
 | `browser_choose(question, options)` | pick among given options → distribution |
 | `browser_snapshot()` | compact numbered element list, for taking over |
@@ -110,13 +173,52 @@ From a source checkout the server reads `TYPESAFE_API_KEY` from the repo's `.env
 Env: `JEV_BROWSER_HEADED=1` shows the browser, `JEV_BROWSER_PROFILE=/dir` keeps a persistent
 profile (logins survive restarts), `JEV_BROWSER_LOG=1` prints per-round decisions to stderr.
 
+#### MCP viewport configuration
+
+Set the viewport on the first `browser_open` call:
+
+```json
+{"url":"https://example.com", "viewport":{"width":1280,"height":800}}
+```
+
+To let the page follow the actual browser window size (including manual resizing):
+
+```json
+{"url":"https://example.com", "viewport":null}
+```
+
+The viewport is a launch setting. Subsequent calls without it keep the current
+configuration. To change it, call `browser_close` and then `browser_open` with the
+new viewport. Omitting it on launch defaults to 1280×800.
+
+You can also set a default in your MCP server configuration's `env`:
+
+```json
+{"JEV_BROWSER_HEADED":"1", "JEV_BROWSER_VIEWPORT":"null"}
+```
+
+For a fixed size, use `"JEV_BROWSER_VIEWPORT":"{\"width\":1280,\"height\":800}"`.
+The explicit `browser_open.viewport` takes precedence over this environment setting.
+
+### Decision cache (replay without Jev)
+
+`browser_do` persists each successful decision to disk (default `.laya-cache.json`, override with
+`JEV_CACHE_FILE`; disable with `JEV_CACHE=0`). On later runs of the same goal, cached actions
+replay **without calling Jev**: the stored stable XPath is re-resolved against the fresh snapshot
+and validated (same element brief, same frame, required values present). A mismatch evicts the
+entry and Jev decides again — self-healing. Irreversible actions are never cached, and secrets
+aren't either (only the `values` key name). The result reports `cache: { hits, saved }`.
+
 ### Library
 
-```js
-// npm install jev-browser && npx playwright install chromium
-import { JevBrowser } from "jev-browser";
+`LayaBrowser` is the public name; `JevBrowser` remains available as a compatibility alias.
+The existing `JEV_*` environment variables continue to configure both backends.
 
-const b = await JevBrowser.launch({ headed: true });
+```js
+// npm install laya-browser && npx playwright install chromium
+import { LayaBrowser } from "laya-browser";
+
+const b = await LayaBrowser.launch({ headed: true });
 await b.open("https://www.saucedemo.com/");
 await b.do("Log in", { values: { username: "standard_user", password: "secret_sauce" } });
 await b.do("Add the Sauce Labs Backpack to the cart");
@@ -137,8 +239,8 @@ blank page to headless Chromium: use headed mode there.
 ### CLI
 
 ```bash
-node bin/jev-browser.mjs do https://the-internet.herokuapp.com/login "Log in" username=tomsmith 'password=SuperSecretPassword!'
-node bin/jev-browser.mjs run examples/flows/todomvc.json --headed
+node bin/laya-browser.mjs do https://the-internet.herokuapp.com/login "Log in" username=tomsmith 'password=SuperSecretPassword!'
+node bin/laya-browser.mjs run examples/flows/todomvc.json --headed
 ```
 
 ## Writing good steps
@@ -185,7 +287,7 @@ git push --follow-tags
 ```
 
 Publishing uses npm trusted publishing, set up once with
-`npx npm@latest trust github jev-browser --file release.yml --repo Ying-Kai-Liao/jev-browser --allow-publish`.
+`npx npm@latest trust github laya-browser --file release.yml --repo MendiburuFrancisco/laya-browser --allow-publish`.
 
 ## License
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Estimate how much page content the calling LLM must read per task:
 //   Playwright MCP style: an AI aria snapshot comes back after every action.
-//   jev-browser MCP: one compact browser_do result per step (Jev reads the page instead).
+//   laya-browser MCP: one compact browser_do result per step (Jev reads the page instead).
 // Uses a finished bench run for action/step counts:  node bench/context-cost.mjs bench/results/r6.json
 // Estimate only: snapshot size is measured on each task's start page and reused for every action.
 import { chromium } from "playwright";
@@ -13,7 +13,7 @@ const byId = new Map(run.results.map(r => [r.id, r]));
 const tasks = [...BASE, ...HARD, ...GUARD].filter(t => byId.has(t.id));
 const tok = chars => Math.round(chars / 4);
 
-// Same shape the MCP server returns for browser_do (see bin/jev-browser-mcp.mjs).
+// Same shape the MCP server returns for browser_do (see bin/laya-browser-mcp.mjs).
 function doResult(s) {
   const actions = (s.actions ?? []).map(h => h.event ? `(event) ${h.event}` : `${h.action} ${h.element ?? ""}${h.value ? ` <- values.${h.value}` : ""}`);
   const out = { status: s.status, url: s.url, title: s.title, actions, done_score: s.done_score, jev_calls: s.jev_calls, ms: s.ms };
@@ -45,5 +45,5 @@ console.log(`${"task".padEnd(22)}${pad("actions", 8)}${pad("snap tok", 10)}${pad
 for (const x of rows) console.log(`${x.id.padEnd(22)}${pad(x.actions, 8)}${pad(x.snapshot_tokens, 10)}${pad(x.playwright_mcp_tokens, 12)}${pad(x.jev_browser_tokens, 11)}${pad((x.playwright_mcp_tokens / x.jev_browser_tokens).toFixed(1) + "×", 7)}`);
 const sum = k => rows.reduce((a, x) => a + x[k], 0);
 const med = arr => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
-console.log(`\ntotal: Playwright-MCP-style ≈ ${sum("playwright_mcp_tokens")} tokens to the LLM; jev-browser ≈ ${sum("jev_browser_tokens")} tokens to the LLM (+ ${sum("jev_tokens_offloaded")} tokens read by Jev)`);
+console.log(`\ntotal: Playwright-MCP-style ≈ ${sum("playwright_mcp_tokens")} tokens to the LLM; laya-browser ≈ ${sum("jev_browser_tokens")} tokens to the LLM (+ ${sum("jev_tokens_offloaded")} tokens read by Jev)`);
 console.log(`median ratio ${med(rows.map(x => x.playwright_mcp_tokens / x.jev_browser_tokens)).toFixed(1)}×`);

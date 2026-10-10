@@ -6,3 +6,8 @@ bench/results/
 bench/tasks.local.mjs
 .profile/
 *.png
+.venv/
+__pycache__/
+.laya-cache.json
+.jev-cache.json
+.opencode/

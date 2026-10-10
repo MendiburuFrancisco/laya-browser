@@ -80,6 +80,39 @@ test("hidden and aria-hidden elements are excluded", () => {
   assert.equal(find(e => e.text === "Behind modal"), undefined);
 });
 
+test("property-bound sidebar controls and native listeners are listed and clickable without hovering", async () => {
+  const b2 = await JevBrowser.launch({ browser });
+  try {
+    await b2.page.setContent(`<style>.item:hover{cursor:pointer}</style>
+      <nav><div id="explore" class="item"><span>Explorar</span></div>
+      <div id="health" class="item"><span>Salud</span></div></nav>
+      <div id="native">Agendar consulta</div><div id="removed">Removed handler</div>
+      <div id="react">Perfil</div><svg id="svg" width="40" height="40" aria-label="Notifications"></svg>
+      <div id="plain">Plain content</div>
+      <script>
+      document.querySelector('#explore').onclick=()=>document.body.dataset.page='explore';
+      document.querySelector('#health').onclick=()=>document.body.dataset.page='health';
+      document.querySelector('#native').addEventListener('click',()=>document.body.dataset.page='appointment');
+      const removed=document.querySelector('#removed'), handler=()=>{};
+      removed.addEventListener('click',handler);removed.removeEventListener('click',handler);
+      document.querySelector('#react').__reactProps$test={onClick:()=>{}};
+      document.querySelector('#svg').__reactProps$test={onClick:()=>{}};
+      </script>`);
+    const pg = await b2.snapshot();
+    for (const [text, destination] of [["Explorar", "explore"], ["Salud", "health"], ["Agendar consulta", "appointment"]]) {
+      const e = pg.elements.find(e => e.text === text);
+      assert.ok(e, `missing ${text}`);
+      await b2.act({ tool: "click", target: e.i });
+      assert.equal(await b2.page.evaluate(() => document.body.dataset.page), destination);
+    }
+    assert.ok(pg.elements.find(e => e.text === "Perfil"));
+    assert.ok(pg.elements.find(e => e.text === "Notifications"));
+    assert.equal(pg.elements.filter(e => e.text === "Explorar").length, 1, "child span isn't duplicated");
+    assert.equal(pg.elements.find(e => e.text === "Removed handler"), undefined);
+    assert.equal(pg.elements.find(e => e.text === "Plain content"), undefined);
+  } finally { await b2.close(); }
+});
+
 test("visible text is the viewport, metrics describe the whole page", () => {
   assert.match(page.text, /Fixture page/);
   assert.doesNotMatch(page.text, /Offscreen paragraph/);
