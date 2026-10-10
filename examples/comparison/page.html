@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Browser decision comparison</title>
+<style>body{font:18px sans-serif;max-width:650px;margin:40px auto}label,input,select,button{margin:10px 0}input,select,button{font:inherit}section{padding:20px;border:1px solid #ccc}</style>
+<main id="app"></main>
+<script>
+const app = document.querySelector('#app');
+const pages = {
+  'fill-field': `<h1>Email entry</h1><section><label for="email">Email address</label><br><input id="email" type="email" placeholder="Email address"></section>`,
+  'checkbox': `<h1>Newsletter preferences</h1><section><label><input id="subscribe" type="checkbox"> Subscribe to newsletter</label></section>`,
+  'select-option': `<h1>Country preference</h1><section><label for="country">Country</label><br><select id="country"><option value="">Choose a country</option><option>Argentina</option><option>Chile</option><option>Uruguay</option></select></section>`,
+  'search': `<h1>Book search</h1><section><label for="query">Search books</label><br><input id="query" type="search" placeholder="Search books"><br><button id="search">Search</button><p id="results" aria-live="polite">No search performed.</p></section>`,
+  'add-todo': `<h1>Todo list</h1><section><label for="todo">New task</label><br><input id="todo" placeholder="New task"><br><button id="add">Add task</button><ul id="tasks"></ul></section>`,
+};
+const id = location.pathname.split('/').pop();
+app.innerHTML = pages[id] || '<h1>Unknown example</h1>';
+document.querySelector('#search')?.addEventListener('click', () => {
+  document.querySelector('#results').textContent = 'Results for: ' + document.querySelector('#query').value;
+});
+document.querySelector('#add')?.addEventListener('click', () => {
+  const field = document.querySelector('#todo');
+  if (!field.value.trim()) return;
+  const item = document.createElement('li'); item.textContent = field.value;
+  document.querySelector('#tasks').append(item); field.value = '';
+});
+</script>
+</html>

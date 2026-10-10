@@ -1,0 +1,17 @@
+{
+  "name": "add-todo",
+  "url": "http://127.0.0.1:8793/add-todo",
+  "steps": [
+    {
+      "goal": "Enter the supplied task into the New task field without submitting it",
+      "values": { "task": "buy milk" },
+      "maxActions": 4,
+      "assert": "() => document.querySelector('#todo').value === 'buy milk'"
+    },
+    {
+      "goal": "Click Add task to add the entered task to the todo list",
+      "maxActions": 4,
+      "assert": "() => document.querySelectorAll('#tasks li').length === 1 && document.querySelector('#tasks li').textContent === 'buy milk'"
+    }
+  ]
+}

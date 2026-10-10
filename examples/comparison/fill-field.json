@@ -1,0 +1,10 @@
+{
+  "name": "fill-field",
+  "url": "http://127.0.0.1:8793/fill-field",
+  "steps": [{
+    "goal": "Enter the supplied email in the Email address field without submitting it",
+    "values": { "email": "benchmark@example.org" },
+    "maxActions": 4,
+    "assert": "() => document.querySelector('#email').value === 'benchmark@example.org'"
+  }]
+}

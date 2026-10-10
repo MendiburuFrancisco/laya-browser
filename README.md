@@ -31,6 +31,20 @@ Laya answers typed questions with probability distributions: yes/no (`noul`), pi
 or a rating (`score`). It never writes text. So everything free-form comes from the caller as
 candidates, and code turns disagreement or low confidence into a status the LLM can act on.
 
+## Jev vs. Laya: reproducible comparison
+
+Five local examples compare field entry, a checkbox, a dropdown, search, and task
+creation with both decision backends. See [examples/comparison](examples/comparison/README.md)
+for setup and [BENCHMARK-JEV-LAYA.md](BENCHMARK-JEV-LAYA.md) for measured results.
+
+```bash
+npm run bench:compare -- --repetitions 3
+```
+
+The runner executes Jev first and Laya second, disables the decision cache, and
+checks the DOM after each step. It reports decision latency, execution time,
+request counts, and token usage when provided by the backend.
+
 ## Results inherited from jev-browser
 
 The results below come from the original project's **Jev backend**, not from Laya.

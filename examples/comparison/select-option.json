@@ -1,0 +1,10 @@
+{
+  "name": "select-option",
+  "url": "http://127.0.0.1:8793/select-option",
+  "steps": [{
+    "goal": "Select Chile in the Country dropdown",
+    "values": { "country": "Chile" },
+    "maxActions": 4,
+    "assert": "() => document.querySelector('#country').value === 'Chile'"
+  }]
+}

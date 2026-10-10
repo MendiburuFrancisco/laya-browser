@@ -1,0 +1,17 @@
+{
+  "name": "search",
+  "url": "http://127.0.0.1:8793/search",
+  "steps": [
+    {
+      "goal": "Enter the supplied query in the Search books field without submitting it",
+      "values": { "query": "browser automation" },
+      "maxActions": 4,
+      "assert": "() => document.querySelector('#query').value === 'browser automation'"
+    },
+    {
+      "goal": "Click the Search button to display results for the entered query",
+      "maxActions": 4,
+      "assert": "() => document.querySelector('#results').textContent === 'Results for: browser automation'"
+    }
+  ]
+}

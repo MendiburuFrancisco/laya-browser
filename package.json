@@ -52,6 +52,7 @@
     "test:e2e": "node test/mcp.e2e.mjs",
     "bench": "node bench/run.mjs",
     "bench:cost": "node bench/context-cost.mjs",
+    "bench:compare": "node bench/compare-backends.mjs",
     "mcp": "node bin/laya-browser-mcp.mjs",
     "setup": "npx playwright install chromium"
   },

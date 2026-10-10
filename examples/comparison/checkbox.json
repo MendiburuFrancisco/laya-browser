@@ -1,0 +1,9 @@
+{
+  "name": "checkbox",
+  "url": "http://127.0.0.1:8793/checkbox",
+  "steps": [{
+    "goal": "Check the Subscribe to newsletter checkbox",
+    "maxActions": 4,
+    "assert": "() => document.querySelector('#subscribe').checked === true"
+  }]
+}
