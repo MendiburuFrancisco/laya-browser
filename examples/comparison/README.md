@@ -65,6 +65,20 @@ necesita `TYPESAFE_API_KEY`. Equivale a:
 node bench/compare-backends.mjs --backend laya --headed --repetitions 1 --pause-ms 3000
 ```
 
+Para ver los mismos ejemplos usando **Jev**, configura `TYPESAFE_API_KEY` en el
+`.env` local y ejecuta:
+
+```bash
+npm run examples:jev
+```
+
+Esto llama a la API de TypeSafe. No hace falta iniciar el servidor Laya. También
+puedes usar el ejecutor directamente:
+
+```bash
+node bench/compare-backends.mjs --backend jev --headed --repetitions 1 --pause-ms 3000
+```
+
 Para regenerar únicamente el Markdown a partir de los datos medidos, sin gastar
 nuevas consultas:
 
