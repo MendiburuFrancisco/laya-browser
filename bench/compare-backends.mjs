@@ -16,6 +16,11 @@ const option = (name, fallback) => {
 };
 const repetitions = Number(option('--repetitions', '3'));
 if (!Number.isInteger(repetitions) || repetitions < 1) throw new Error('Repetitions must be a positive integer');
+const headed = process.argv.includes('--headed');
+const backends = option('--backend', 'jev,laya').split(',');
+if (backends.some(backend => !['jev', 'laya'].includes(backend)) || !backends.length) {
+  throw new Error('--backend must be jev, laya, or jev,laya');
+}
 const ids = ['fill-field', 'checkbox', 'select-option', 'search', 'add-todo'];
 const out = resolve(option('--out', 'bench/results/backend-comparison'));
 const worker = option('--worker');
@@ -69,7 +74,7 @@ async function runWorker() {
       if (!response.ok) throw new Error(`Laya health HTTP ${response.status}`);
       health = await response.json();
     }
-    browser = await LayaBrowser.launch();
+    browser = await LayaBrowser.launch({ headed });
     browser.cache = null;
     await browser.call({ text: 'Benchmark warmup' }, { q: { type: 'noul', instructions: 'Does the text contain Benchmark?' } });
     await browser.close(); browser = null;
@@ -78,7 +83,7 @@ async function runWorker() {
       for (const id of ids) {
         currentTask = `${id}:${repetition}`;
         const flow = JSON.parse(readFileSync(resolve(ROOT, 'examples/comparison', `${id}.json`), 'utf8'));
-        browser = await LayaBrowser.launch(); browser.cache = null;
+        browser = await LayaBrowser.launch({ headed }); browser.cache = null;
         const t = performance.now(), firstRequest = requests.length, steps = [];
         try {
           await browser.open(`${option('--base-url')}/${id}`);
@@ -104,6 +109,8 @@ async function runWorker() {
           false_done: steps.some(s => s.status === 'done' && s.truth === false), steps };
         results.push(rec);
         console.log(`${BACKEND} ${currentTask}: ${rec.verified ? 'PASS' : 'FAIL'} ${rec.execution_ms}ms, ${rec.calls} calls`);
+        const pauseMs = Number(option('--pause-ms', headed ? '2000' : '0'));
+        if (headed && pauseMs > 0) await browser.page.waitForTimeout(pauseMs);
         await browser.close(); browser = null;
         // Persist completed work even if a subsequent task is interrupted.
         save();
@@ -131,13 +138,14 @@ async function compare() {
   const base = `http://127.0.0.1:${server.address().port}`;
   const runs = [];
   try {
-    for (const backend of ['jev', 'laya']) {
+    for (const backend of backends) {
       const endpoint = backend === 'jev' ? option('--jev-url', 'https://api.typesafe.ai/v1/systemone')
         : option('--laya-url', 'http://127.0.0.1:8791/v1/systemone');
       const model = backend === 'jev' ? 'jev-latest' : 'cklxx/laya-browser';
       await new Promise((resolve, reject) => {
         const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--worker', backend,
-          '--repetitions', String(repetitions), '--base-url', base, '--out', out], {
+          '--repetitions', String(repetitions), '--base-url', base, '--out', out,
+          ...(headed ? ['--headed'] : [])], {
           cwd: ROOT, stdio: 'inherit', env: { ...process.env, JEV_BACKEND: backend, JEV_API_URL: endpoint,
             JEV_MODEL: model, JEV_CACHE: '0' },
         });
@@ -161,8 +169,8 @@ function markdown(report) {
   const repetitions = report.runs[0]?.repetitions;
   const lines = ['# Comparación de Jev y Laya', '', `Fecha UTC: ${report.date}`, '',
     '## Metodología', '',
-    `- Cinco ejemplos locales idénticos, ${repetitions} repeticiones por backend; orden: Jev, luego Laya.`,
-    '- Ejecución secuencial, contexto nuevo por ejemplo, navegador headless y caché desactivada.',
+    `- Cinco ejemplos locales idénticos, ${repetitions} repeticiones por backend; orden: ${backends.join(', ')}.`,
+    `- Ejecución secuencial, contexto nuevo por ejemplo, navegador ${headed ? 'visible (headed)' : 'headless'} y caché desactivada.`,
     '- Una consulta de calentamiento por backend, excluida de las tablas de tareas; se informa su consumo por separado.',
     '- Verificación determinista del DOM después de cada paso. Se distingue objetivo logrado en el DOM de éxito confirmado por DOM + estado done/likely_done.',
     '- Latencia de decisión: petición HTTP completa medida por el cliente, incluyendo red, inferencia y lectura de respuesta. No es inferencia pura.',

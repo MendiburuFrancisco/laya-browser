@@ -53,6 +53,7 @@
     "bench": "node bench/run.mjs",
     "bench:cost": "node bench/context-cost.mjs",
     "bench:compare": "node bench/compare-backends.mjs",
+    "examples:laya": "node bench/compare-backends.mjs --backend laya --headed --repetitions 1 --pause-ms 3000 --out bench/results/laya-examples",
     "mcp": "node bin/laya-browser-mcp.mjs",
     "setup": "npx playwright install chromium"
   },

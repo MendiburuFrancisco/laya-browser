@@ -48,6 +48,23 @@ Puedes cambiar los endpoints con `--jev-url` y `--laya-url`. El ejecutor estable
 explícitamente backend, endpoint y modelo en cada proceso para evitar que los
 valores del `.env` local mezclen Jev con Laya.
 
+Para recorrer y **ver en pantalla los cinco ejemplos con Laya**, inicia primero el
+servidor Laya y ejecuta:
+
+```bash
+npm run examples:laya
+```
+
+El navegador abre una ventana visible por ejemplo, ejecuta cada tarea una vez y
+mantiene cada resultado 3 segundos en pantalla antes de cerrar esa ventana. Puedes
+cambiar la pausa con `--pause-ms 5000`. El estado y la verificación del DOM aparecen
+en la consola. No
+necesita `TYPESAFE_API_KEY`. Equivale a:
+
+```bash
+node bench/compare-backends.mjs --backend laya --headed --repetitions 1 --pause-ms 3000
+```
+
 Para regenerar únicamente el Markdown a partir de los datos medidos, sin gastar
 nuevas consultas:
 
