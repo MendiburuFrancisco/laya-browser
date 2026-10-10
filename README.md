@@ -89,19 +89,74 @@ npm run test:e2e                 # MCP server end to end (network + key)
 
 ### Local Laya backend (CPU or CUDA)
 
-Install Python dependencies in an isolated environment (Python 3.11+):
+This fork uses the [cklxx/laya-browser model on Hugging Face](https://huggingface.co/cklxx/laya-browser)
+as its browser decision checkpoint. It is a fine-tuned version of
+[Laya](https://huggingface.co/convaiinnovations/laya), a non-autoregressive model
+that answers typed questions without generating text.
+
+#### 1. Install the Laya Python package
+
+Requirements: **Python 3.11+**, Node.js 20+, and Internet access for the initial
+dependency installation and model download. CPU execution is supported; CUDA
+execution requires an NVIDIA GPU and a CUDA-compatible PyTorch installation.
+
+From the repository root, create an isolated environment with
+[uv](https://docs.astral.sh/uv/getting-started/installation/) and install the
+project's pinned Laya dependency (`laya==0.4.2`):
 
 ```bash
 uv venv --python 3.11 .venv
 uv pip install --python .venv/bin/python -r local/requirements.txt
-.venv/bin/python local/laya_server.py --device cpu
 ```
 
-The first launch downloads `cklxx/laya-browser` and `convaiinnovations/laya` from Hugging Face. Subsequent
-launches reuse the downloaded checkpoint. Use `--device cuda` for an NVIDIA GPU,
-or `--model /absolute/path/to/checkpoint` to load a local copy.
+Alternatively, use Python's built-in virtual environment and pip:
 
-In a second terminal, run the browser against the local server:
+```bash
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -r local/requirements.txt
+```
+
+#### 2. Download the models and start the local server
+
+For CPU:
+
+```bash
+.venv/bin/python local/laya_server.py --model cklxx/laya-browser --device cpu
+```
+
+For CUDA:
+
+```bash
+.venv/bin/python local/laya_server.py --model cklxx/laya-browser --device cuda
+```
+
+The first launch automatically downloads **two checkpoints** from Hugging Face:
+
+- [`cklxx/laya-browser`](https://huggingface.co/cklxx/laya-browser): selects browser operations and target elements.
+- [`convaiinnovations/laya`](https://huggingface.co/convaiinnovations/laya): answers auxiliary questions, including checks, values, errors, and irreversible actions.
+
+Subsequent launches reuse the Hugging Face cache. Keep this terminal running and
+wait for the `Laya ready` message before connecting the browser.
+
+To download the checkpoints into the Hugging Face cache ahead of time:
+
+```bash
+.venv/bin/python -c 'from huggingface_hub import snapshot_download; snapshot_download("cklxx/laya-browser"); snapshot_download("convaiinnovations/laya")'
+```
+
+If you already have local copies, pass their directories with
+`--model /absolute/path/to/laya-browser` and `--checks-model /absolute/path/to/laya`.
+
+#### 3. Verify readiness and connect the browser
+
+In a second terminal, check that both models have loaded:
+
+```bash
+curl http://127.0.0.1:8791/health
+```
+
+The response should contain `"ok": true`, the model IDs or paths, and the selected
+device. Then run the browser against the local server:
 
 ```bash
 JEV_BACKEND=laya JEV_CACHE=0 node bin/laya-browser.mjs run examples/flows/laya-smoke.json --headed
@@ -110,6 +165,16 @@ JEV_BACKEND=laya JEV_CACHE=0 node bin/laya-browser.mjs run examples/flows/laya-s
 For MCP, set `JEV_BACKEND=laya` in the server environment or in the repository's
 `.env`. No TypeSafe API key is required. `JEV_API_URL` overrides the default
 `http://127.0.0.1:8791/v1/systemone`. Check readiness at `/health`.
+For example, add these settings to `.env`:
+
+```dotenv
+JEV_BACKEND=laya
+JEV_API_URL=http://127.0.0.1:8791/v1/systemone
+JEV_CACHE=0
+```
+
+For step-by-step MCP configuration in Spanish, see [MCP-LAYA.md](MCP-LAYA.md).
+
 Use a separate `JEV_CACHE_FILE=.laya-cache.json` when enabling the decision cache
 to avoid replaying decisions previously made by Jev.
 
