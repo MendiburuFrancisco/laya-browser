@@ -4,6 +4,25 @@ export const FIELDISH = e => !!e && (/^(input:(text|email|password|search|tel|ur
 export const SELECTISH = e => !!e && (e.tag === "select" || !!e.options);
 export const FILEISH = e => !!e && e.tag === "input:file";
 
+// Controls that dismiss a modal or banner. Whole-string match only, so "Close position" or
+// "Close account" never qualify; for text-less controls the class/id hint must contain the word.
+const CLOSE_RE = /^\s*(close|dismiss|got it|關閉|關掉|我知道了|[×✕✖xX])\s*$/i;
+const CLOSE_HINT_RE = /(^|\s)(close|dismiss|關閉)(\s|$)/i;
+
+// The uncovered control that most plainly closes an overlay, or undefined. Overlays are usually
+// appended at the end of the body, so the last match wins. Links that would leave the page are
+// not dismissals; same-page anchors ("#", "/path#close" on /path) are.
+export function pickCloser(elements, pageUrl) {
+  let here = "";
+  try { const u = new URL(pageUrl); here = u.pathname + u.search; } catch {}
+  // an href back to the current page without a hash reloads it (and clears the form), so only a hash counts
+  const samePage = h => !h || /^(#|javascript)/i.test(h) || (h.includes("#") && [here, pageUrl.split("#")[0]].includes(h.split("#")[0]));
+  return elements.findLast(e => !e.covered && !e.hidden && !e.disabled
+    && (/^(a|button)$/.test(e.tag) || /\[button\]$/.test(e.tag))
+    && samePage(e.href)
+    && ([e.text, e.label].some(t => t && CLOSE_RE.test(t)) || (!e.text && !e.label && !!e.hint && CLOSE_HINT_RE.test(e.hint))));
+}
+
 export function brief(e) {
   if (!e) return "?";
   const name = e.label || e.text || e.placeholder || e.name || e.near || e.href || "";
@@ -102,6 +121,7 @@ function elementLine(e, urls) {
   // identifies the element (icon-only links would otherwise render as a bare `[7] a`).
   if (e.href && (urls || !(e.label || e.text || e.placeholder || e.name || e.near))) f.push(`href=${e.href}`);
   if (e.near && !e.text) f.push(`near="${e.near}"`);
+  if (e.hint) f.push(`hint="${e.hint}"`);
   if (e.frame) f.push(`frame=${e.frame}`);
   return `[${e.i}] ${e.tag} ${f.join(" ")}`;
 }
