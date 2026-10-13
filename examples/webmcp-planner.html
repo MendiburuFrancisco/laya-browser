@@ -32,6 +32,7 @@
   .legend { color: #8a8a96; margin-bottom: 12px; } .legend b { font-weight: 600; }
   .ev { border-left: 3px solid var(--tool); padding: 4px 8px; margin: 0 0 6px; background: #1f1f26; border-radius: 0 6px 6px 0; animation: in .2s; }
   .ev.click { border-color: var(--click); } .ev b { color: #b7adff; } .ev.click b { color: #ff9c9f; } .ev .ret { color: #7fd1a3; }
+  .ev .key::before { content: attr(data-k) " → "; color: #b7adff; } .ev .val { color: #f2f2f5; } .ev .arg { color: #8a8a96; }
   .count { color: #8a8a96; margin-bottom: 10px; }
   @keyframes in { from { opacity: 0; transform: translateY(3px); } }
 </style>
@@ -109,10 +110,20 @@
   $("clear").onclick = () => { const n = items.filter(i => i.done).length; items = items.filter(i => !i.done); render(); status(n ? `Cleared ${n} completed item${n > 1 ? "s" : ""}` : "Nothing to clear"); };
   const status = msg => { $("status").textContent = msg; clearTimeout(status.t); status.t = setTimeout(() => { $("status").textContent = ""; }, 4000); };
 
+  // detail: a string, or [[arg, chosen, value]] rows for a tool call
   function logEv(kind, name, detail, ret) {
     const d = document.createElement("div"); d.className = "ev " + kind;
     const b = document.createElement("b"); b.textContent = name; d.append(b);
-    if (detail) { const x = document.createElement("div"); x.textContent = detail; d.append(x); }
+    if (typeof detail === "string") { const x = document.createElement("div"); x.textContent = detail; d.append(x); }
+    else for (const [arg, chosen, value] of detail ?? []) {
+      const x = document.createElement("div"), span = (c, t) => { const e = document.createElement("span"); e.className = c; e.textContent = t; x.append(e); };
+      span("arg", arg + ": ");
+      // the values key is drawn by CSS (::before), so it is on screen but not in the page text Jev
+      // reads; seeing its own earlier picks there threw off which value it picked next
+      if (chosen?.startsWith("values.")) { span("key", ""); x.lastChild.dataset.k = chosen; }
+      span("val", JSON.stringify(value));
+      d.append(x);
+    }
     if (ret) { const r = document.createElement("div"); r.className = "ret"; r.textContent = "→ " + ret; d.append(r); }
     $("log").prepend(d);
   }
@@ -127,7 +138,9 @@
   const tool = (name, description, properties, required, fn, extra = {}) => document.modelContext.registerTool({
     name, description, inputSchema: { type: "object", properties, required }, ...extra,
     async execute(args) {
-      const ret = fn(args ?? {}); tools++; logEv("tool", name, JSON.stringify(args), ret); render();
+      // window.__jevArgKeys (set by the demo) says where Jev took each argument from, e.g. text <- values.g1
+      const chosen = window.__jevArgKeys ?? {}; window.__jevArgKeys = null;
+      const ret = fn(args ?? {}); tools++; logEv("tool", name, Object.entries(args ?? {}).map(([k, v]) => [k, chosen[k], v]), ret); render();
       return { content: [{ type: "text", text: ret }] };
     },
   });

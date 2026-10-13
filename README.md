@@ -24,6 +24,12 @@ Claude ◀── { status: "done", url, actions[], done_score } ─┘
 
 https://github.com/user-attachments/assets/2e688df9-4985-4854-8ebe-ba97c9d13d68
 
+With [WebMCP](#webmcp-when-the-page-offers-its-own-tools), a page offers its own tools. Jev
+chooses between those and the page's buttons, and fills each argument by picking one of the
+caller's `values` (`text: values.g1 → "milk"`), never by writing text:
+
+https://github.com/user-attachments/assets/fe309fb8-aada-4187-a91e-f18493a39526
+
 Jev only answers with probability distributions: yes/no (`noul`), pick one option (`choice`)
 or a rating (`score`). It never writes text. So everything free-form comes from the caller as
 candidates, and code turns disagreement or low confidence into a status the LLM can act on.
@@ -232,7 +238,8 @@ await b.close();
 ### Watch it
 
 ```bash
-node examples/webmcp-demo.mjs        # headed: 9 plain goals on a planner; Jev picks page tools or clicks, ~16 s
+node examples/webmcp-demo.mjs        # headed: 9 plain goals on a planner; Jev picks page tools or clicks, ~25 s
+STEP_MS=800 RECORD=demo.mp4 node examples/webmcp-demo.mjs   # same, paced, recorded at 2x (needs ffmpeg)
 node examples/x-profile-demo.mjs     # headed, read-only x.com walkthrough with decision highlights
 ```
 
