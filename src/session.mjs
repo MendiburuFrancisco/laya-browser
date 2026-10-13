@@ -13,6 +13,7 @@ import { chromium } from "playwright";
 import { jev } from "./jev.mjs";
 import { ENUMERATE, EXTRACT_BLOCKS } from "./page-script.mjs";
 import { FIELDISH, SELECTISH, FILEISH, brief, pickCloser, pageDiff, repeatedElements, formatPage, formatDiff, redactPage } from "./page-model.mjs";
+import { WEBMCP_INIT, webmcpText } from "./webmcp.mjs";
 import { normalizeBlocks, batchBlocks, batchQuestions, pickBlocks, readResult, totalChars, MIN_PRUNE_CHARS, BUDGET_CHARS, DROP_BELOW, MAX_JEV_CALLS } from "./prune.mjs";
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -97,6 +98,7 @@ export class JevBrowser {
       const go = () => mo.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
       document ? go() : addEventListener("DOMContentLoaded", go);
     });
+    context.addInitScript(WEBMCP_INIT);
     const track = r => ["fetch", "xhr", "document"].includes(r.resourceType()) && this.inflight.set(r, Date.now());
     const untrack = r => this.inflight.delete(r);
     context.on("request", track); context.on("requestfinished", untrack); context.on("requestfailed", untrack);
@@ -606,6 +608,26 @@ export class JevBrowser {
       setTimeout(() => box.remove(), 1400);
     }, label);
     await sleep(900);
+  }
+
+  // WebMCP tools the current page registered (name, description, inputSchema, annotations).
+  async webmcpTools() {
+    return this.page.evaluate(() => window.__jevWebmcp?.list() ?? []).catch(() => []);
+  }
+
+  // Run one of the page's WebMCP tools. The page's own code runs; no Jev call, no element picking.
+  async webmcpCall(name, args = {}, { timeout = 30_000 } = {}) {
+    const t0 = Date.now();
+    let timer;
+    const r = await Promise.race([
+      this.page.evaluate(([n, a]) => window.__jevWebmcp ? window.__jevWebmcp.call(n, a) : { error: "WebMCP registry missing on this page" }, [name, args]),
+      new Promise(res => { timer = setTimeout(() => res({ error: `WebMCP tool "${name}" did not finish within ${timeout} ms` }), timeout); }),
+    ]).catch(e => ({ error: String(e.message).split("\n")[0] })).finally(() => clearTimeout(timer));
+    await this.settle({ max: 4000 });   // a tool may navigate or re-render
+    const out = { tool: name, url: this.page.url(), ms: Date.now() - t0 };
+    if (r.error) out.error = r.error; else out.result = webmcpText(r.result);
+    if (this.events.length) out.events = this.events.splice(0);
+    return out;
   }
 
   async screenshot({ path, fullPage = false } = {}) { return this.page.screenshot({ path, fullPage }); }

@@ -1,6 +1,6 @@
 {
   "name": "jev-browser",
-  "version": "0.1.2",
+  "version": "0.7.0",
   "description": "Browser automation where an LLM plans and Jev (Typesafe System One) makes every per-step decision. Library, CLI and MCP server.",
   "keywords": [
     "mcp",
