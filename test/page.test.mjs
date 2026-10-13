@@ -3,7 +3,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { JevBrowser, repeatsBlock, actionError } from "../src/session.mjs";
-import { pageDiff, formatPage, repeatedElements, pickCloser } from "../src/page-model.mjs";
+import { pageDiff, formatPage, repeatedElements, pickCloser, redactValues, REDACTED } from "../src/page-model.mjs";
 
 const FIXTURE = `<!doctype html><html><head><title>Fixture</title>
 <style>.ghost{opacity:0;position:absolute} .hidden{display:none} .sizerow{position:relative;width:320px;height:90px} .sizerow input{opacity:0;position:absolute;inset:0;width:320px;height:90px;margin:0} .sizerow label{position:relative;display:block;width:320px;height:90px} .sizeinner{height:100%} .vh{position:absolute;top:0;left:0;width:1px;height:1px;clip:rect(1px,1px,1px,1px);clip-path:inset(0 0 99.9% 99.9%);margin:0} .colornav-item{position:relative;padding:10px;list-style:none} .colornav-item label{display:block;width:42px;height:42px} th{cursor:default} .clicky{cursor:pointer} .far{margin-top:3000px}</style></head><body>
@@ -439,4 +439,17 @@ test("pickCloser: plain close controls only, last one wins, never a navigating l
   assert.equal(pickCloser([E(1, { tag: "a", text: "Close", href: "/home?a=1#close" })], url)?.i, 1);
   assert.equal(pickCloser([E(1, { tag: "a", text: "Close", href: "/home?a=1" })], url), undefined);   // reloads the page
   assert.equal(pickCloser([E(1, { tag: "div[button]", text: "✕" })], url)?.i, 1);
+});
+
+test("secrets in values are shown to Jev by key only; the real value is still typed", async () => {
+  assert.deepEqual(redactValues({ email: "a@b.com", password: "hunter2", pw: "x", otp_code: "1", card_number: "4242", pin: "9", shipping: "fast" }),
+    { email: "a@b.com", password: REDACTED, pw: REDACTED, otp_code: REDACTED, card_number: REDACTED, pin: REDACTED, shipping: "fast" });
+  const b = Object.create(JevBrowser.prototype);
+  let sent;
+  b.call = async (state, questions) => { sent = JSON.stringify({ state, questions }); return { answers: {} }; };
+  const page = { url: "u", title: "t", text: "", elements: [{ i: 0, tag: "input:password", label: "Password" }] };
+  await b.decide(page, "Log in", { username: "ada", password: "hunter2" }, [], undefined);
+  assert.ok(!sent.includes("hunter2"));
+  assert.ok(sent.includes("ada"));
+  assert.equal(b.resolve(page, { tool: { choice: "type", probabilities: { type: 1 } }, target: { choice: "0", probabilities: { 0: 1 } }, value: { choice: "password" } }, { username: "ada", password: "hunter2" }).value, "hunter2");
 });

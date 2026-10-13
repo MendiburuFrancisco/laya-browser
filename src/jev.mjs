@@ -14,14 +14,17 @@ let cachedKey;
 export function apiKey() {
   if (cachedKey) return cachedKey;
   for (const k of KEY_NAMES) if (process.env[k]) return (cachedKey = process.env[k]);
-  for (const p of [resolve(process.cwd(), ".env"), resolve(ROOT, ".env")]) {
+  // The MCP server skips the working directory's .env: as a plugin that is the user's project,
+  // and a key found there was not given to this server.
+  const files = process.env.JEV_BROWSER_MCP === "1" ? [resolve(ROOT, ".env")] : [resolve(process.cwd(), ".env"), resolve(ROOT, ".env")];
+  for (const p of files) {
     if (!existsSync(p)) continue;
     for (const line of readFileSync(p, "utf8").split("\n")) {
       const m = line.match(/^\s*(?:export\s+)?([A-Z_]+)\s*=\s*"?([^"\s]+)"?/);
       if (m && KEY_NAMES.includes(m[1])) return (cachedKey = m[2]);
     }
   }
-  throw new Error("No TypeSafe API key: set TYPESAFE_API_KEY in the environment or in .env");
+  throw new Error("No TypeSafe API key: set TYPESAFE_API_KEY (as a Claude Code plugin: /plugin, then configure jev-browser) or put it in .env");
 }
 
 // questions: { name: { type: "noul" | "choice" | "score", instructions, criteria? } }

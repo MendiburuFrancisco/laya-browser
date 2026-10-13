@@ -12,7 +12,7 @@
 import { chromium } from "playwright";
 import { jev } from "./jev.mjs";
 import { ENUMERATE, EXTRACT_BLOCKS } from "./page-script.mjs";
-import { FIELDISH, SELECTISH, FILEISH, brief, pickCloser, pageDiff, repeatedElements, formatPage, formatDiff, redactPage } from "./page-model.mjs";
+import { FIELDISH, SELECTISH, FILEISH, brief, pickCloser, pageDiff, repeatedElements, formatPage, formatDiff, redactPage, redactValues, SECRET_KEY, REDACTED } from "./page-model.mjs";
 import { WEBMCP_INIT, webmcpText } from "./webmcp.mjs";
 import { normalizeBlocks, batchBlocks, batchQuestions, pickBlocks, readResult, totalChars, MIN_PRUNE_CHARS, BUDGET_CHARS, DROP_BELOW, MAX_JEV_CALLS } from "./prune.mjs";
 
@@ -194,9 +194,21 @@ export class JevBrowser {
   }
 
   async call(state, questions) {
-    const r = await jev(state, questions);
+    const r = await this.ask(this.redact(state), questions);
     this.stats.calls++; this.stats.jev_ms += r.ms; this.stats.tokens += r.tokens;
     return r;
+  }
+
+  ask(state, questions) { return jev(state, questions); }
+
+  // Secret fields show as [redacted], and a secret value given to do() is cut from anything the
+  // page echoes back (its text, a diff, a page tool's result) before the request leaves.
+  redact(state) {
+    if (state.page) state = { ...state, page: redactPage(state.page) };
+    if (!this.secrets?.size) return state;
+    let json = JSON.stringify(state);
+    for (const v of this.secrets) json = json.split(JSON.stringify(v).slice(1, -1)).join(REDACTED);
+    return JSON.parse(json);
   }
 
   // Yes/no question about the current page -> probability.
@@ -283,6 +295,7 @@ export class JevBrowser {
   }
 
   async decide(page, goal, values, history, lastChange, webmcp = []) {
+    values = redactValues(values);   // what Jev sees; resolve() types the real value
     if (webmcp.length) page = { ...page, webmcp_tools: webmcp.map(t => ({ name: t.name, description: t.description.slice(0, 300), arguments: Object.keys(t.inputSchema?.properties ?? {}) })) };
     const task = { goal, ...(Object.keys(values).length ? { values } : {}), history, ...(lastChange ? { last_change: lastChange } : {}) };
     const withValues = Object.keys(values).length ? ", with the given `task.values`" : "";
@@ -373,7 +386,7 @@ export class JevBrowser {
   argQuestions(tool, values, prefix) {
     const props = Object.entries(tool.inputSchema?.properties ?? {});
     const required = new Set(tool.inputSchema?.required ?? []);
-    const shown = values;   // (secret redaction hooks in here)
+    const shown = redactValues(values);   // Jev sees the key, never a secret's value
     const qs = {}, keys = [];
     for (const [n, [k, prop]] of props.entries()) {
       const isEnum = Array.isArray(prop?.enum);
@@ -406,7 +419,7 @@ export class JevBrowser {
   async webmcpArgs(page, goal, history, act, values) {
     const { qs, keys } = this.argQuestions({ name: act.webmcp, inputSchema: act.schema }, values, "a");
     if (!keys.length) { act.argKeys = {}; return {}; }
-    const { answers } = await this.call({ page: { url: page.url, title: page.title, text: page.text }, task: { goal, ...(Object.keys(values).length ? { values } : {}), history }, tool: { name: act.webmcp, inputSchema: act.schema } }, qs);
+    const { answers } = await this.call({ page: { url: page.url, title: page.title, text: page.text }, task: { goal, ...(Object.keys(values).length ? { values: redactValues(values) } : {}), history }, tool: { name: act.webmcp, inputSchema: act.schema } }, qs);
     return this.argsFrom(answers, keys, values, act);
   }
 
@@ -542,6 +555,8 @@ export class JevBrowser {
 
   async runGoal(goal, { values = {}, maxActions = 10, doneAt = 0.5, minTarget = 0.3, allowIrreversible = false, irreversibleAt = 0.6, log = () => {} } = {}) {
     const t0 = Date.now(); const calls0 = this.stats.calls;
+    this.secrets ??= new Set();
+    for (const [k, v] of Object.entries(values)) if (SECRET_KEY.test(k) && String(v).length >= 4) this.secrets.add(String(v));
     const history = []; const rounds = [];
     let prevPage = null, waits = 0, page = null, status = "max_actions", info, pending, retried = false;
     const seen = new Map(), dismissed = new Map();   // url -> dismiss attempts
@@ -551,7 +566,7 @@ export class JevBrowser {
       page = await this.snapshot();
       if (this.events.length) history.push(...this.events.splice(0).map(e => ({ event: e })));
       const webmcp = await this.webmcpTools();
-      const a = await this.decide(page, goal, values, history.slice(-12), round ? pageDiff(prevPage, page) : undefined, webmcp);
+      const a = await this.decide(page, goal, values, history.slice(-12), round ? pageDiff(redactPage(prevPage), redactPage(page)) : undefined, webmcp);
       prevPage = page;
       const act = this.resolve(page, a, values, webmcp);
       const done = Math.max(a.done.noul, a.done_change?.noul ?? 0);

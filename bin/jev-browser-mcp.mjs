@@ -4,17 +4,41 @@
 //   claude mcp add jev-browser -- node /path/to/jev-browser/bin/jev-browser-mcp.mjs
 //
 // Env: TYPESAFE_API_KEY, JEV_BROWSER_HEADED=1,
-//      JEV_BROWSER_PROFILE=/dir (persistent profile, keeps logins), JEV_BROWSER_LOG=1 (rounds to stderr)
+//      JEV_BROWSER_PROFILE=/dir (persistent profile, keeps logins), JEV_BROWSER_LOG=1 (rounds to stderr),
+//      JEV_BROWSER_NO_INSTALL=1 (don't download Chromium on first use)
+import { createRequire } from "node:module";
+import { execFile } from "node:child_process";
+import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { JevBrowser } from "../src/session.mjs";
 import { formatRead } from "../src/prune.mjs";
 
+process.env.JEV_BROWSER_MCP = "1";   // src/jev.mjs: don't read the working directory's .env
+const require = createRequire(import.meta.url);
+const { version } = require("../package.json");
+
+// Installed through npx or as a plugin, nothing has downloaded Chromium yet: do it on first launch,
+// with the Playwright this package depends on so the browser build matches.
+async function installChromium() {
+  const cli = join(dirname(require.resolve("playwright/package.json")), "cli.js");
+  process.stderr.write("jev-browser: Chromium for Playwright is missing, installing it (one time, a few hundred MB)\n");
+  await promisify(execFile)(process.execPath, [cli, "install", "chromium"], { timeout: 600_000 });
+}
+const HEADED = /^(1|true)$/i.test(process.env.JEV_BROWSER_HEADED ?? "");   // plugin userConfig passes "true"/"false"
+const launch = () => JevBrowser.launch({ headed: HEADED, highlight: HEADED, userDataDir: process.env.JEV_BROWSER_PROFILE || undefined });
+
 // Holds the launch promise, not the session, so parallel tool calls share one browser.
 let session;
 function browser() {
-  session ??= JevBrowser.launch({ headed: process.env.JEV_BROWSER_HEADED === "1", highlight: process.env.JEV_BROWSER_HEADED === "1", userDataDir: process.env.JEV_BROWSER_PROFILE || undefined })
+  session ??= launch()
+    .catch(async e => {
+      if (!/not installed/.test(e.message) || process.env.JEV_BROWSER_NO_INSTALL === "1") throw e;
+      await installChromium();
+      return launch();
+    })
     .catch(e => { session = undefined; throw e; });
   return session;
 }
@@ -28,10 +52,11 @@ const fail = e => ({ isError: true, content: [{ type: "text", text: String(e?.me
 const wrap = fn => async args => { try { return await fn(args); } catch (e) { return fail(e); } };
 const stderrLog = process.env.JEV_BROWSER_LOG === "1" ? s => process.stderr.write(s + "\n") : () => {};
 
-const server = new McpServer({ name: "jev-browser", version: "0.2.0" });
+const server = new McpServer({ name: "jev-browser", version });
 
 server.registerTool("browser_open", {
   title: "Open URL",
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   description: "Navigate the browser session to a URL and wait until the page settles. Starts the browser on first use.",
   inputSchema: { url: z.string().describe("Absolute URL") },
 }, wrap(async ({ url }) => {
@@ -44,6 +69,7 @@ server.registerTool("browser_open", {
 
 server.registerTool("browser_do", {
   title: "Do one browser step",
+  annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   description: [
     "Work toward ONE observable outcome on the current page. A fast decision model (Jev) picks each element/action/value; it cannot write text or plan, so:",
     "- Write one outcome per call (\"Log in\", \"Add the Backpack to the cart\", \"Open the Pull requests tab\"); split ordered sub-tasks into separate calls.",
@@ -72,6 +98,7 @@ server.registerTool("browser_do", {
 
 server.registerTool("browser_check", {
   title: "Check page",
+  annotations: { readOnlyHint: true, openWorldHint: true },
   description: "Ask a yes/no question about the current page. Returns the probability of yes (≥0.85 reliable yes, ≤0.15 reliable no, in between: look yourself with browser_snapshot).",
   inputSchema: { question: z.string() },
 }, wrap(async ({ question }) => {
@@ -82,6 +109,7 @@ server.registerTool("browser_check", {
 
 server.registerTool("browser_choose", {
   title: "Choose about page",
+  annotations: { readOnlyHint: true, openWorldHint: true },
   description: "Ask which of several options is true of the current page. Options must be provided (Jev cannot generate text). Returns the choice and a probability per option.",
   inputSchema: { question: z.string(), options: z.array(z.string()).min(2).max(255) },
 }, wrap(async ({ question, options }) => {
@@ -92,6 +120,7 @@ server.registerTool("browser_choose", {
 
 server.registerTool("browser_snapshot", {
   title: "Page snapshot",
+  annotations: { readOnlyHint: true, openWorldHint: false },
   description: [
     "Compact view of the current page: visible text and numbered interactive elements. Use it to take over when browser_do is ambiguous or stuck, then act with browser_act.",
     "This is the one observation you read in full, so narrow it: `diff` after an action, `filter` when you know what you are looking for, `interactive` when the page's prose does not matter.",
@@ -109,6 +138,7 @@ server.registerTool("browser_snapshot", {
 
 server.registerTool("browser_act", {
   title: "Act on element",
+  annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   description: "Perform one action on an element number from the latest browser_snapshot (or from browser_do candidates). No decision model involved. Numbers are matched to the current page; if the element is gone, take a new snapshot. Confirm/prompt dialogs the action opens are dismissed unless accept_dialog is true.",
   inputSchema: {
     action: z.enum(["click", "type", "press_enter", "press_key", "select", "hover", "right_click", "drag", "upload", "scroll", "back"]),
@@ -122,6 +152,7 @@ server.registerTool("browser_act", {
 
 server.registerTool("browser_screenshot", {
   title: "Screenshot",
+  annotations: { readOnlyHint: true, openWorldHint: false },
   description: "Screenshot of the current page (viewport unless full_page).",
   inputSchema: { full_page: z.boolean().optional() },
 }, wrap(async ({ full_page }) => {
@@ -131,6 +162,7 @@ server.registerTool("browser_screenshot", {
 
 server.registerTool("browser_close", {
   title: "Close browser",
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   description: "Close the browser session. The next call starts a fresh one.",
   inputSchema: {},
 }, wrap(async () => {
@@ -140,6 +172,7 @@ server.registerTool("browser_close", {
 
 server.registerTool("browser_read", {
   title: "Read page content",
+  annotations: { readOnlyHint: true, openWorldHint: true },
   description: [
     "Return the part of the current page's text that helps answer a question. Use it to READ a page; use browser_snapshot to ACT on one.",
     "browser_snapshot only shows the text in the viewport (a long article is ~1% of its content), so this is the way to reach the rest of a document without scrolling and snapshotting it piece by piece.",

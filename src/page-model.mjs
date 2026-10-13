@@ -99,12 +99,19 @@ const NARROW_HINT = "narrow with filter, interactive or diff";
 
 const secret = e => e.tag === "input:password" && e.value !== undefined && e.value !== "";
 
-// A snapshot must never echo a typed password back to the caller. Redacting here rather than in
-// the collector keeps the page model (and what Jev is shown, which never leaves the process)
+// A typed password must never leave the process: not in a snapshot for the caller, not in the
+// state sent to the Jev API. Redacting here rather than in the collector keeps the page model
 // intact, so element matching in currentElement() still sees the real value.
 export function redactPage(page) {
   if (!page?.elements?.some(secret)) return page;
   return { ...page, elements: page.elements.map(e => secret(e) ? { ...e, value: REDACTED } : e) };
+}
+
+// `values` whose key names a secret are shown to Jev by key only. Jev picks which key to use;
+// the real string is typed locally by Playwright, so Jev never needs it.
+export const SECRET_KEY = /pass|^pw|pwd|secret|token|otp|cvv|cvc|card|ssn|api.?key|^pin$/i;
+export function redactValues(values) {
+  return Object.fromEntries(Object.entries(values).map(([k, v]) => [k, SECRET_KEY.test(k) ? REDACTED : v]));
 }
 
 const FILTERABLE = ["label", "text", "placeholder", "name", "href"];

@@ -84,7 +84,7 @@ test("webmcpText flattens MCP content and caps size", () => {
 // Jev stubbed: every question gets a default answer, `script(round)` overrides per decide() round.
 function stubJev(b, script) {
   const sent = []; let round = -1;
-  b.call = async (state, questions) => {
+  b.ask = async (state, questions) => {
     sent.push({ state, questions });
     if (questions.tool) round++;
     const over = questions.tool ? script(round) : script.args ?? {};
@@ -105,7 +105,7 @@ test("browser_do: Jev can pick a page tool, and fills its argument from values",
   script.args = { a0: "todo" };
   const sent = stubJev(b, script);
   const r = await b.do("Add 'buy milk' to the list", { values: { todo: "buy milk" } });
-  delete b.call;
+  delete b.ask;
   assert.equal(r.status, "done");
   assert.deepEqual(r.actions[0], { action: "webmcp", element: "tool add_todo", args: { text: "values.todo" }, result: "added buy milk" });
   assert.equal(await b.page.textContent("#out"), "buy milk");
@@ -121,7 +121,7 @@ test("browser_do: a page tool not marked read-only waits for allow_irreversible"
   script.args = { a0: "todo" };
   stubJev(b, script);
   const r = await b.do("Add 'buy milk'", { values: { todo: "buy milk" } });
-  delete b.call;
+  delete b.ask;
   assert.equal(r.status, "needs_confirmation");
   assert.deepEqual(r.pending, { action: "webmcp", element: "tool add_todo", args: { text: "values.todo" }, p_irreversible: 0.9 });
   assert.equal(await b.page.textContent("#out"), "empty");
@@ -131,7 +131,7 @@ test("browser_do: a failing page tool is reported in the history, not thrown", a
   await b.open(`${base}/current`);
   stubJev(b, r => r === 0 ? { tool: "webmcp", webmcp_tool: "boom" } : { tool: "none" });
   const r = await b.do("Do the thing");
-  delete b.call;
+  delete b.ask;
   assert.equal(r.actions[0].error, "page tool boom: nope");
 });
 
@@ -139,7 +139,7 @@ test("browser_do: no page tools, no webmcp action offered", async () => {
   await b.open(`${base}/none`);
   const sent = stubJev(b, () => ({ tool: "none" }));
   await b.do("Anything");
-  delete b.call;
+  delete b.ask;
   assert.equal(sent[0].questions.tool.criteria.webmcp, undefined);
   assert.equal(sent[0].questions.webmcp_tool, undefined);
   assert.equal(sent[0].state.page.webmcp_tools, undefined);
@@ -149,7 +149,7 @@ test("browser_do: arguments ride in the decide request, so a tool call costs no 
   await b.open(`${base}/current`);
   const sent = stubJev(b, r => r === 0 ? { tool: "webmcp", webmcp_tool: "add_todo", t0a0: "todo" } : { done: 0.95, done_change: 0.95, tool: "none" });
   const r = await b.do("Add it", { values: { other: "x", todo: "buy milk" } });
-  delete b.call;
+  delete b.ask;
   assert.equal(r.actions[0].result, "added buy milk");
   assert.equal(sent.length, 2);   // two rounds, no follow-up
   assert.ok(sent[0].questions.t0a0 && sent[0].questions.use_tool);
@@ -159,6 +159,19 @@ test("browser_do: when Jev says a page tool fits, it is used even if click was t
   await b.open(`${base}/current`);
   stubJev(b, r => r === 0 ? { tool: "click", use_tool: 0.8, webmcp_tool: "add_todo", t0a0: "todo" } : { done: 0.95, done_change: 0.95, tool: "none" });
   const r = await b.do("Add it", { values: { todo: "buy milk" } });
-  delete b.call;
+  delete b.ask;
   assert.equal(r.actions[0].action, "webmcp");
+});
+
+test("browser_do: a secret filled into a page tool's argument is never sent to Jev", async () => {
+  await b.open(`${base}/current`);
+  const sent = stubJev(b, r => r === 0 ? { tool: "webmcp", webmcp_tool: "add_todo", t0a0: "password" } : { done: 0.95, done_change: 0.95, tool: "none" });
+  const r = await b.do("Add it", { values: { password: "hunter2" } });
+  // the follow-up path (arguments asked separately) redacts too
+  const act = { webmcp: "add_todo", schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } };
+  const args = await b.webmcpArgs({ url: "", title: "", text: "" }, "Add it", [], act, { password: "hunter2" });
+  delete b.ask;
+  assert.equal(r.actions[0].result, "added hunter2");   // the page got the real value
+  assert.deepEqual(args, { text: "hunter2" });
+  assert.ok(!JSON.stringify(sent).includes("hunter2"));
 });
