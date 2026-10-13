@@ -94,6 +94,20 @@ From a source checkout the server reads `TYPESAFE_API_KEY` from the repo's `.env
 | `browser_read(question, max_chars?)` | the page text that helps answer a question; Jev drops the rest |
 | `browser_screenshot(full_page?)` | PNG image |
 | `browser_close()` | end the session |
+| `browser_webmcp_tools()` | list the [WebMCP](https://github.com/webmachinelearning/webmcp) tools the page registered |
+| `browser_webmcp_call(name, arguments?)` | run one of the page's WebMCP tools; no clicking, no Jev call |
+
+### WebMCP: when the page offers its own tools
+
+A page that supports [WebMCP](https://github.com/webmachinelearning/webmcp) registers tools for
+agents with `document.modelContext.registerTool(...)` (or `navigator.modelContext.provideContext`
+in earlier drafts). An init script records them before the page's scripts run, in every browser —
+where Chromium has no native `modelContext`, a minimal one is installed so feature-detecting pages
+still register. `browser_open` lists their names as `webmcp_tools`; `browser_webmcp_tools` gives
+each schema, and `browser_webmcp_call` runs the page's own `execute`, which is faster and more
+exact than driving the UI. Main frame only. Tool descriptions and results come from the site:
+untrusted, and results are capped at 20k chars. A tool not marked `readOnlyHint` may have side
+effects, so the caller should treat it like `allow_irreversible`.
 
 ### Reading a page: `browser_read`
 
@@ -251,6 +265,7 @@ Private sites and credentials go in `bench/tasks.local.mjs` (git-ignored), expor
 src/session.mjs      JevBrowser: settle, snapshot, decide (1 or 2 stages), resolve, act, do, check, choose
 src/page-script.mjs  runs in each frame: elements, labels, state, visible text, metrics, dialogs
 src/page-model.mjs   pure helpers: diff between pages, counts, compact rendering
+src/webmcp.mjs       init script recording the page's WebMCP tools; result formatting
 src/prune.mjs        pure helpers: split page text into blocks, batch, rank, reassemble
 src/jev.mjs          System One API client
 src/flow.mjs         JSON flow runner
