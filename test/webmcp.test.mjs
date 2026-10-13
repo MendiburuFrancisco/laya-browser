@@ -80,3 +80,67 @@ test("webmcpText flattens MCP content and caps size", () => {
   assert.equal(webmcpText(undefined), "null");
   assert.match(webmcpText("x".repeat(30), 10), /^x{10}\n\[… 20 chars cut\]$/);
 });
+
+// Jev stubbed: every question gets a default answer, `script(round)` overrides per decide() round.
+function stubJev(b, script) {
+  const sent = []; let round = -1;
+  b.call = async (state, questions) => {
+    sent.push({ state, questions });
+    if (questions.tool) round++;
+    const over = questions.tool ? script(round) : script.args ?? {};
+    const answers = {};
+    for (const [k, q] of Object.entries(questions)) {
+      const want = over[k];
+      if (q.type === "noul") answers[k] = { noul: want ?? 0 };
+      else { const c = want ?? Object.keys(q.criteria)[0]; answers[k] = { choice: c, probabilities: { [c]: 1 }, confidence: 1 }; }
+    }
+    return { answers, ms: 1, tokens: 0 };
+  };
+  return sent;
+}
+
+test("browser_do: Jev can pick a page tool, and fills its argument from values", async () => {
+  await b.open(`${base}/current`);
+  const script = r => r === 0 ? { tool: "webmcp", webmcp_tool: "add_todo" } : { done: 0.95, done_change: 0.95, tool: "none" };
+  script.args = { a0: "todo" };
+  const sent = stubJev(b, script);
+  const r = await b.do("Add 'buy milk' to the list", { values: { todo: "buy milk" } });
+  delete b.call;
+  assert.equal(r.status, "done");
+  assert.deepEqual(r.actions[0], { action: "webmcp", element: "tool add_todo", args: { text: "values.todo" }, result: "added buy milk" });
+  assert.equal(await b.page.textContent("#out"), "buy milk");
+  const first = sent[0];
+  assert.equal(first.questions.tool.criteria.webmcp !== undefined, true);
+  assert.deepEqual(first.state.page.webmcp_tools.map(t => t.name), ["add_todo", "boom", "hang"]);
+  assert.deepEqual(first.state.page.webmcp_tools[0].arguments, ["text"]);
+});
+
+test("browser_do: a page tool not marked read-only waits for allow_irreversible", async () => {
+  await b.open(`${base}/current`);
+  const script = () => ({ tool: "webmcp", webmcp_tool: "add_todo", irreversible: 0.9 });
+  script.args = { a0: "todo" };
+  stubJev(b, script);
+  const r = await b.do("Add 'buy milk'", { values: { todo: "buy milk" } });
+  delete b.call;
+  assert.equal(r.status, "needs_confirmation");
+  assert.deepEqual(r.pending, { action: "webmcp", element: "tool add_todo", args: { text: "values.todo" }, p_irreversible: 0.9 });
+  assert.equal(await b.page.textContent("#out"), "empty");
+});
+
+test("browser_do: a failing page tool is reported in the history, not thrown", async () => {
+  await b.open(`${base}/current`);
+  stubJev(b, r => r === 0 ? { tool: "webmcp", webmcp_tool: "boom" } : { tool: "none" });
+  const r = await b.do("Do the thing");
+  delete b.call;
+  assert.equal(r.actions[0].error, "page tool boom: nope");
+});
+
+test("browser_do: no page tools, no webmcp action offered", async () => {
+  await b.open(`${base}/none`);
+  const sent = stubJev(b, () => ({ tool: "none" }));
+  await b.do("Anything");
+  delete b.call;
+  assert.equal(sent[0].questions.tool.criteria.webmcp, undefined);
+  assert.equal(sent[0].questions.webmcp_tool, undefined);
+  assert.equal(sent[0].state.page.webmcp_tools, undefined);
+});

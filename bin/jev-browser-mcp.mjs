@@ -50,6 +50,7 @@ server.registerTool("browser_do", {
     "- Put every string to type, option to pick or file path to upload in `values`, with meaningful keys ({email, password}).",
     "- Make open-ended goals measurable (\"until at least 3 new results are shown\").",
     "Statuses: done | likely_done (Jev is unsure the goal is met: verify with browser_check or browser_snapshot before moving on) | needs_login (sign-in wall and no credentials given: ask the user to log in, e.g. with JEV_BROWSER_HEADED=1 and JEV_BROWSER_PROFILE, or pass credentials in values) | needs_confirmation (next click looks irreversible: re-call with allow_irreversible=true only if the user wants it) | error (page shows an error) | blocked | stuck | ambiguous (see candidates; use browser_act) | max_actions.",
+    "If the page registered WebMCP tools, Jev may call one instead of clicking, filling its arguments from `values` (actions show as `webmcp tool <name>`).",
     "After steps with side effects, use browser_check to confirm nothing unintended changed.",
   ].join("\n"),
   inputSchema: {
@@ -62,7 +63,7 @@ server.registerTool("browser_do", {
 }, wrap(async ({ goal, values, max_actions, allow_irreversible, explain }) => {
   const b = await browser();
   const r = await b.do(goal, { values: values ?? {}, maxActions: max_actions ?? 10, allowIrreversible: !!allow_irreversible, log: stderrLog });
-  const actions = r.actions.map(h => h.event ? `(event) ${h.event}` : `${h.action}${h.key ? ` ${h.key}` : ""} ${h.element ?? ""}${h.value ? ` <- values.${h.value}` : ""}${h.option ? ` <- "${h.option}"` : ""}${h.destination ? ` -> ${h.destination}` : ""}${h.error ? `  ERROR: ${h.error}` : ""}`.trim());
+  const actions = r.actions.map(h => h.event ? `(event) ${h.event}` : `${h.action}${h.key ? ` ${h.key}` : ""} ${h.element ?? ""}${h.value ? ` <- values.${h.value}` : ""}${h.option ? ` <- "${h.option}"` : ""}${h.destination ? ` -> ${h.destination}` : ""}${h.args ? ` ${JSON.stringify(h.args)}` : ""}${h.result ? ` => ${JSON.stringify(h.result.slice(0, 120))}` : ""}${h.error ? `  ERROR: ${h.error}` : ""}`.trim());
   const out = { status: r.status, url: r.url, title: r.title, actions, done_score: r.done_score, jev_calls: r.jev_calls, ms: r.ms };
   for (const k of ["info", "pending", "page_text", "candidates"]) if (r[k]) out[k] = r[k];
   if (explain) out.rounds = r.rounds.map(({ candidates, ...x }) => x);
