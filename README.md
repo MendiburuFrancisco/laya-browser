@@ -103,9 +103,18 @@ A page that supports [WebMCP](https://github.com/webmachinelearning/webmcp) regi
 agents with `document.modelContext.registerTool(...)` (or `navigator.modelContext.provideContext`
 in earlier drafts). An init script records them before the page's scripts run, in every browser —
 where Chromium has no native `modelContext`, a minimal one is installed so feature-detecting pages
-still register. `browser_open` lists their names as `webmcp_tools`; `browser_webmcp_tools` gives
-each schema, and `browser_webmcp_call` runs the page's own `execute`, which is faster and more
-exact than driving the UI. Main frame only. Tool descriptions and results come from the site:
+still register. `browser_open` lists their names as `webmcp_tools`.
+
+**In `browser_do`, Jev uses them.** Each round, the page's tools are offered next to click, type
+and the rest. When Jev picks one, a follow-up question fills its arguments: each is one of your
+`values` or, for an `enum`, one of its options, because Jev never writes text. The page's own
+`execute` runs, its result goes into the step's history for the "done?" judgement, and the action
+shows as `webmcp tool add_todo {"text":"values.todo"} => "…"`. A tool the site does not mark
+`readOnlyHint` is guarded like a click: if it looks irreversible the step stops with
+`needs_confirmation`.
+
+To call a tool yourself instead, `browser_webmcp_tools` gives each schema and
+`browser_webmcp_call` runs it directly, with no Jev call. Main frame only. Tool descriptions and results come from the site:
 untrusted, and results are capped at 20k chars. A tool not marked `readOnlyHint` may have side
 effects, so the caller should treat it like `allow_irreversible`.
 
@@ -197,6 +206,7 @@ await b.close();
 ### Watch it
 
 ```bash
+node examples/webmcp-demo.mjs        # headed: plain browser_do goals, Jev calls the page's WebMCP tools
 node examples/x-profile-demo.mjs     # headed, read-only x.com walkthrough with decision highlights
 ```
 
