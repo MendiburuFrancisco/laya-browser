@@ -116,6 +116,30 @@ From a source checkout the server reads `TYPESAFE_API_KEY` from the repo's `.env
 | `browser_read(question, max_chars?)` | the page text that helps answer a question; Jev drops the rest |
 | `browser_screenshot(full_page?)` | PNG image |
 | `browser_close()` | end the session |
+| `browser_webmcp_tools()` | list the [WebMCP](https://github.com/webmachinelearning/webmcp) tools the page registered |
+| `browser_webmcp_call(name, arguments?)` | run one of the page's WebMCP tools; no clicking, no Jev call |
+
+### WebMCP: when the page offers its own tools
+
+A page that supports [WebMCP](https://github.com/webmachinelearning/webmcp) registers tools for
+agents with `document.modelContext.registerTool(...)` (or `navigator.modelContext.provideContext`
+in earlier drafts). An init script records them before the page's scripts run, in every browser —
+where Chromium has no native `modelContext`, a minimal one is installed so feature-detecting pages
+still register. `browser_open` lists their names as `webmcp_tools`.
+
+**In `browser_do`, Jev uses them.** Each round, the page's tools are offered next to click, type
+and the rest, with a yes/no "can one of the page's tools do the next step?" that decides between
+them. The same request fills every tool's arguments: each is one of your `values` or, for an
+`enum`, one of its options (a list, a priority), because Jev never writes text. The page's own
+`execute` runs, its result goes into the step's history for the "done?" judgement, and the action
+shows as `webmcp tool add_todo {"text":"values.todo"} => "…"`. A tool the site does not mark
+`readOnlyHint` is guarded like a click: if it looks irreversible the step stops with
+`needs_confirmation`.
+
+To call a tool yourself instead, `browser_webmcp_tools` gives each schema and
+`browser_webmcp_call` runs it directly, with no Jev call. Main frame only. Tool descriptions and results come from the site:
+untrusted, and results are capped at 20k chars. A tool not marked `readOnlyHint` may have side
+effects, so the caller should treat it like `allow_irreversible`.
 
 ### Reading a page: `browser_read`
 
@@ -208,6 +232,7 @@ await b.close();
 ### Watch it
 
 ```bash
+node examples/webmcp-demo.mjs        # headed: 9 plain goals on a planner; Jev picks page tools or clicks, ~16 s
 node examples/x-profile-demo.mjs     # headed, read-only x.com walkthrough with decision highlights
 ```
 
@@ -276,6 +301,7 @@ Private sites and credentials go in `bench/tasks.local.mjs` (git-ignored), expor
 src/session.mjs      JevBrowser: settle, snapshot, decide (1 or 2 stages), resolve, act, do, check, choose
 src/page-script.mjs  runs in each frame: elements, labels, state, visible text, metrics, dialogs
 src/page-model.mjs   pure helpers: diff between pages, counts, compact rendering
+src/webmcp.mjs       init script recording the page's WebMCP tools; result formatting
 src/prune.mjs        pure helpers: split page text into blocks, batch, rank, reassemble
 src/jev.mjs          System One API client
 src/flow.mjs         JSON flow runner
@@ -322,7 +348,8 @@ your key:
   questions;
 - the `values` you pass, **except** those whose key names a secret (`password`, `pw`, `token`,
   `secret`, `otp`, `card`, `cvv`, `cvc`, `ssn`, `api_key`, `pin`). Those are shown by key only.
-  Values typed into password fields are also redacted.
+  Values typed into password fields are also redacted, and so is a secret value the page
+  shows back (in its text or a WebMCP tool's result).
 
 Playwright types the real values locally. TypeSafe's handling of this data is covered by its
 own terms. Screenshots and snapshots go only to your MCP client. See [PRIVACY.md](PRIVACY.md).

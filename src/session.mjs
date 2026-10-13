@@ -12,7 +12,8 @@
 import { chromium } from "playwright";
 import { jev } from "./jev.mjs";
 import { ENUMERATE, EXTRACT_BLOCKS } from "./page-script.mjs";
-import { FIELDISH, SELECTISH, FILEISH, brief, pickCloser, pageDiff, repeatedElements, formatPage, formatDiff, redactPage, redactValues } from "./page-model.mjs";
+import { FIELDISH, SELECTISH, FILEISH, brief, pickCloser, pageDiff, repeatedElements, formatPage, formatDiff, redactPage, redactValues, SECRET_KEY, REDACTED } from "./page-model.mjs";
+import { WEBMCP_INIT, webmcpText } from "./webmcp.mjs";
 import { normalizeBlocks, batchBlocks, batchQuestions, pickBlocks, readResult, totalChars, MIN_PRUNE_CHARS, BUDGET_CHARS, DROP_BELOW, MAX_JEV_CALLS } from "./prune.mjs";
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -31,10 +32,17 @@ export const TOOLS = {
   wait: "Wait: the page is still loading or processing (spinner, 'loading…', busy/disabled button)",
   none: "No action: the goal is already achieved, or nothing on this page can make progress",
 };
+// Offered only when the page registered WebMCP tools (see src/webmcp.mjs).
+export const WEBMCP_ACTION = "Call one of the page's own agent tools in `page.webmcp_tools`. The site provides them for agents and one call does the whole step (no typing into fields, no submit button), so when a tool does what the next step needs, choose this over click or type";
 // `back` is not offered to Jev (it proposed it after successful steps); callers can still use it via act().
 export const KEYS = ["Escape", "Tab", "Space", "Backspace", "Delete", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End"];
 const TARGETED = new Set(["click", "type", "press_enter", "select", "hover", "right_click", "drag", "upload"]);
 const GUARDED = new Set(["click", "press_enter", "press_key"]);
+// a page tool can change anything the page can, unless the site marks it read-only
+const guarded = act => GUARDED.has(act.tool) || (act.tool === "webmcp" && !act.readOnly);
+const ARG_SKIP = "(leave out)";
+const MAX_INLINE_ARGS = 24;   // argument questions carried in the decide() request
+const actLabel = act => act.tool === "webmcp" ? `tool ${act.webmcp}` : brief(act.el);
 // dialog policies: dialog -> accept? Alerts and "leave page?" carry no decision; confirm/prompt may.
 export const SAFE_DIALOGS = d => ["alert", "beforeunload"].includes(d.type());
 export const ACCEPT_DIALOGS = () => true;
@@ -97,6 +105,7 @@ export class JevBrowser {
       const go = () => mo.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
       document ? go() : addEventListener("DOMContentLoaded", go);
     });
+    context.addInitScript(WEBMCP_INIT);
     const track = r => ["fetch", "xhr", "document"].includes(r.resourceType()) && this.inflight.set(r, Date.now());
     const untrack = r => this.inflight.delete(r);
     context.on("request", track); context.on("requestfinished", untrack); context.on("requestfailed", untrack);
@@ -185,9 +194,21 @@ export class JevBrowser {
   }
 
   async call(state, questions) {
-    const r = await jev(state.page ? { ...state, page: redactPage(state.page) } : state, questions);
+    const r = await this.ask(this.redact(state), questions);
     this.stats.calls++; this.stats.jev_ms += r.ms; this.stats.tokens += r.tokens;
     return r;
+  }
+
+  ask(state, questions) { return jev(state, questions); }
+
+  // Secret fields show as [redacted], and a secret value given to do() is cut from anything the
+  // page echoes back (its text, a diff, a page tool's result) before the request leaves.
+  redact(state) {
+    if (state.page) state = { ...state, page: redactPage(state.page) };
+    if (!this.secrets?.size) return state;
+    let json = JSON.stringify(state);
+    for (const v of this.secrets) json = json.split(JSON.stringify(v).slice(1, -1)).join(REDACTED);
+    return JSON.parse(json);
   }
 
   // Yes/no question about the current page -> probability.
@@ -273,8 +294,9 @@ export class JevBrowser {
     });
   }
 
-  async decide(page, goal, values, history, lastChange) {
+  async decide(page, goal, values, history, lastChange, webmcp = []) {
     values = redactValues(values);   // what Jev sees; resolve() types the real value
+    if (webmcp.length) page = { ...page, webmcp_tools: webmcp.map(t => ({ name: t.name, description: t.description.slice(0, 300), arguments: Object.keys(t.inputSchema?.properties ?? {}) })) };
     const task = { goal, ...(Object.keys(values).length ? { values } : {}), history, ...(lastChange ? { last_change: lastChange } : {}) };
     const withValues = Object.keys(values).length ? ", with the given `task.values`" : "";
     const common = {
@@ -284,15 +306,25 @@ export class JevBrowser {
       error: { type: "noul", instructions: "Does `page` show an error or rejection message (e.g. invalid credentials, a validation error, not found) caused by the actions in `task.history`?" },
       login: { type: "noul", instructions: "Is `page` a sign-in or sign-up screen, or asking the user to log in, before `task.goal` can continue?" },
       irreversible: { type: "noul", instructions: "Would the next action toward `task.goal` on `page` have an effect outside this browser that is hard to undo, such as placing an order, paying, sending a message, deleting data or publishing?" },
-      tool: { type: "choice", instructions: "What is the next action toward `task.goal` on `page`, given what `task.history` already did?", criteria: TOOLS },
+      tool: { type: "choice", instructions: "What is the next action toward `task.goal` on `page`, given what `task.history` already did?", criteria: webmcp.length ? { ...TOOLS, webmcp: WEBMCP_ACTION } : TOOLS },
     };
+    let argKeys;
+    if (webmcp.length) {
+      common.use_tool = { type: "noul", instructions: "Can one of `page.webmcp_tools` (the page's own tools for agents) do the next step toward `task.goal`, given what `task.history` already did? A tool call replaces typing into fields and pressing buttons for that step." };
+      common.webmcp_tool = { type: "choice", instructions: "If the next action toward `task.goal` calls one of `page.webmcp_tools`, which one?", criteria: Object.fromEntries(webmcp.map(t => [t.name, t.description.slice(0, 200) || null])) };
+      const per = webmcp.map((t, i) => this.argQuestions(t, values, `t${i}a`));
+      if (per.reduce((n, p) => n + p.keys.length, 0) <= MAX_INLINE_ARGS) {
+        argKeys = Object.fromEntries(webmcp.map((t, i) => [t.name, per[i].keys]));
+        for (const p of per) Object.assign(common, p.qs);
+      }
+    }
     if (Object.keys(values).length) common.value = { type: "choice", instructions: "If the next action toward `task.goal` types, selects or uploads something, which of `task.values` should it use? Prefer values not yet entered on `page`.", criteria: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, String(v).slice(0, 200)])) };
     const targetQ = { type: "choice", instructions: "Which entry of `page.elements` (by its `i`) should the next action toward `task.goal` act on?" };
 
     if (page.elements.length <= MAX_SINGLE && JSON.stringify(page).length <= MAX_STATE_CHARS) {
       targetQ.criteria = Object.fromEntries(page.elements.map(e => [String(e.i), null]));
       const r = await this.call({ page, task }, { ...common, ...(page.elements.length ? { target: targetQ } : {}) });
-      return { ...r.answers, stages: 1 };
+      return { ...r.answers, stages: 1, argKeys };
     }
     // Two stages: groups of consecutive elements, then elements in the likeliest groups.
     const groups = [];
@@ -300,7 +332,7 @@ export class JevBrowser {
       const els = page.elements.slice(k, k + GROUP);
       groups.push({ g: groups.length, summary: els.map(e => (e.label || e.text || e.placeholder || e.href || e.tag).slice(0, 24)).join(" | ").slice(0, 700) });
     }
-    const lite = { url: page.url, title: page.title, text: page.text, metrics: page.metrics, dialogs: page.dialogs, groups };
+    const lite = { url: page.url, title: page.title, text: page.text, metrics: page.metrics, dialogs: page.dialogs, groups, ...(page.webmcp_tools ? { webmcp_tools: page.webmcp_tools } : {}) };
     const r1 = await this.call({ page: lite, task }, {
       ...common,
       group: { type: "choice", instructions: "Which entry of `page.groups` (by its `g`) contains the element the next action toward `task.goal` should act on? Each group summarises consecutive page elements.", criteria: Object.fromEntries(groups.map(g => [String(g.g), null])) },
@@ -312,12 +344,23 @@ export class JevBrowser {
     const r2 = await this.call({ page: { url: page.url, title: page.title, text: page.text.slice(0, 1200), elements: sub }, task }, {
       target: { ...targetQ, criteria: Object.fromEntries(sub.map(e => [String(e.i), null])) },
     });
-    return { ...r1.answers, target: r2.answers.target, stages: 2, groups_considered: pick };
+    return { ...r1.answers, target: r2.answers.target, stages: 2, groups_considered: pick, argKeys };
   }
 
   // Resolve independent tool/target/value answers into one consistent action.
-  resolve(page, a, values) {
+  resolve(page, a, values, webmcp = []) {
     let tool = a.tool.choice;
+    // Prefer the page's own tool whenever Jev says one fits the next step, unless nothing is left to do
+    if (a.use_tool?.noul >= 0.5 && !["none", "wait"].includes(tool)) tool = "webmcp";
+    if (tool === "webmcp") {
+      const t = webmcp.find(t => t.name === a.webmcp_tool?.choice);
+      if (t) {
+        const act = { tool, p_tool: Math.max(a.tool.probabilities.webmcp ?? 0, a.use_tool?.noul ?? 0), webmcp: t.name, schema: t.inputSchema, readOnly: !!t.annotations?.readOnlyHint, target: null, p_target: a.webmcp_tool.probabilities[t.name], candidates: [] };
+        if (a.argKeys) act.args = this.argsFrom(a, a.argKeys[t.name], values, act);
+        return act;
+      }
+      tool = "none";   // no tool picked: treated as no action, so the loop reports stuck rather than guessing
+    }
     const byI = new Map(page.elements.map(e => [String(e.i), e]));
     const ranked = a.target ? Object.entries(a.target.probabilities).sort((x, y) => y[1] - x[1]) : [];
     const fits = { type: FIELDISH, press_enter: e => FIELDISH(e) || e.tag.startsWith("input"), select: SELECTISH, upload: FILEISH };
@@ -335,6 +378,58 @@ export class JevBrowser {
       valueKey, value: valueKey != null ? values[valueKey] : undefined,
       candidates: ranked.slice(0, 3).map(([i, p]) => ({ i: +i, p: +p.toFixed(2), el: brief(byI.get(i)) })),
     };
+  }
+
+  // A page tool's arguments, filled without writing text: each is one of the caller's `values`
+  // or, for an enum, one of its options. Jev picks; code converts to the schema's type.
+  // These questions normally ride along in the decide() request (no extra round trip).
+  argQuestions(tool, values, prefix) {
+    const props = Object.entries(tool.inputSchema?.properties ?? {});
+    const required = new Set(tool.inputSchema?.required ?? []);
+    const shown = redactValues(values);   // Jev sees the key, never a secret's value
+    const qs = {}, keys = [];
+    for (const [n, [k, prop]] of props.entries()) {
+      const isEnum = Array.isArray(prop?.enum);
+      const opts = isEnum ? prop.enum.map(String) : Object.keys(values);
+      if (!opts.length) continue;
+      const criteria = Object.fromEntries(opts.map(o => [o, isEnum ? null : String(shown[o]).slice(0, 200)]));
+      if (!required.has(k)) criteria[ARG_SKIP] = null;
+      const what = prop?.description ? ` (${String(prop.description).slice(0, 150)})` : "";
+      qs[`${prefix}${n}`] = { type: "choice", instructions: `If the next action toward \`task.goal\` calls the page tool \`${tool.name}\`, what should its \`${k}\` argument be${what}? Pick what the goal needs next, given what \`task.history\` already did.`, criteria };
+      keys.push([`${prefix}${n}`, k, prop]);
+    }
+    return { qs, keys };
+  }
+
+  argsFrom(answers, keys, values, act) {
+    const args = {}; act.argKeys = {};
+    for (const [q, k, prop] of keys) {
+      const c = answers[q]?.choice;
+      if (c == null || c === ARG_SKIP) continue;
+      const isEnum = Array.isArray(prop?.enum);
+      const raw = isEnum ? prop.enum.find(o => String(o) === c) : values[c];
+      const type = Array.isArray(prop?.type) ? prop.type[0] : prop?.type;
+      args[k] = type === "number" || type === "integer" ? Number(raw) : type === "boolean" ? (typeof raw === "boolean" ? raw : /^(true|yes|1|on)$/i.test(String(raw))) : raw;
+      act.argKeys[k] = isEnum ? c : `values.${c}`;
+    }
+    return args;
+  }
+
+  // Fallback when the questions did not fit in the decide() request: one follow-up call.
+  async webmcpArgs(page, goal, history, act, values) {
+    const { qs, keys } = this.argQuestions({ name: act.webmcp, inputSchema: act.schema }, values, "a");
+    if (!keys.length) { act.argKeys = {}; return {}; }
+    const { answers } = await this.call({ page: { url: page.url, title: page.title, text: page.text }, task: { goal, ...(Object.keys(values).length ? { values: redactValues(values) } : {}), history }, tool: { name: act.webmcp, inputSchema: act.schema } }, qs);
+    return this.argsFrom(answers, keys, values, act);
+  }
+
+  // One page tool call: the page's code runs, with a timeout. No settling, events left in place.
+  async runWebmcp(name, args, timeout = 30_000) {
+    let timer;
+    return Promise.race([
+      this.page.evaluate(([n, a]) => window.__jevWebmcp ? window.__jevWebmcp.call(n, a) : { error: "WebMCP registry missing on this page" }, [name, args]),
+      new Promise(res => { timer = setTimeout(() => res({ error: `WebMCP tool "${name}" did not finish within ${timeout} ms` }), timeout); }),
+    ]).catch(e => ({ error: String(e.message).split("\n")[0] })).finally(() => clearTimeout(timer));
   }
 
   locate(i) {
@@ -388,6 +483,12 @@ export class JevBrowser {
       case "wait": await sleep(1000); break;
       case "back": await this.page.goBack({ timeout: 10_000 }).catch(() => {}); break;
       case "none": break;
+      case "webmcp": {
+        const r = await this.runWebmcp(act.webmcp, act.args ?? {});
+        if (r.error) throw new Error(`page tool ${act.webmcp}: ${r.error}`);
+        act.result = webmcpText(r.result, 300);
+        break;
+      }
       default: throw new Error(`unknown action ${act.tool}`);
     }
     return Date.now() - t;
@@ -454,6 +555,8 @@ export class JevBrowser {
 
   async runGoal(goal, { values = {}, maxActions = 10, doneAt = 0.5, minTarget = 0.3, allowIrreversible = false, irreversibleAt = 0.6, log = () => {} } = {}) {
     const t0 = Date.now(); const calls0 = this.stats.calls;
+    this.secrets ??= new Set();
+    for (const [k, v] of Object.entries(values)) if (SECRET_KEY.test(k) && String(v).length >= 4) this.secrets.add(String(v));
     const history = []; const rounds = [];
     let prevPage = null, waits = 0, page = null, status = "max_actions", info, pending, retried = false;
     const seen = new Map(), dismissed = new Map();   // url -> dismiss attempts
@@ -462,30 +565,37 @@ export class JevBrowser {
       await this.settle();
       page = await this.snapshot();
       if (this.events.length) history.push(...this.events.splice(0).map(e => ({ event: e })));
-      const a = await this.decide(page, goal, values, history.slice(-12), round ? pageDiff(redactPage(prevPage), redactPage(page)) : undefined);
+      const webmcp = await this.webmcpTools();
+      const a = await this.decide(page, goal, values, history.slice(-12), round ? pageDiff(redactPage(prevPage), redactPage(page)) : undefined, webmcp);
       prevPage = page;
-      const act = this.resolve(page, a, values);
+      const act = this.resolve(page, a, values, webmcp);
       const done = Math.max(a.done.noul, a.done_change?.noul ?? 0);
       const r = {
         round, done: +done.toFixed(2), done_plain: +a.done.noul.toFixed(2), done_change: +(a.done_change?.noul ?? 0).toFixed(2),
         blocked: +a.blocked.noul.toFixed(2), error_shown: +a.error.noul.toFixed(2), login: +a.login.noul.toFixed(2), irreversible: +a.irreversible.noul.toFixed(2),
-        tool: act.tool, p_tool: +act.p_tool.toFixed(2), target: act.target, p_target: +act.p_target.toFixed(2), el: brief(act.el),
+        tool: act.tool, p_tool: +act.p_tool.toFixed(2), target: act.target, p_target: +act.p_target.toFixed(2), el: actLabel(act),
         value: act.valueKey, elements: page.elements.length, stages: a.stages, candidates: act.candidates,
       };
       rounds.push(r);
-      log(`  r${round}: ${act.tool}(${r.p_tool}) -> #${act.target} ${r.el} (${r.p_target})${act.valueKey ? ` value=${act.valueKey}` : ""}  done=${r.done} err=${r.error_shown} login=${r.login} irrev=${r.irreversible}  [${page.elements.length} els${a.stages === 2 ? ", 2-stage" : ""}]`);
+      log(`  r${round}: ${act.tool}(${r.p_tool}) -> ${act.target != null ? `#${act.target} ` : ""}${r.el} (${r.p_target})${act.valueKey ? ` value=${act.valueKey}` : ""}  done=${r.done} err=${r.error_shown} login=${r.login} irrev=${r.irreversible}${a.use_tool ? ` use_tool=${a.use_tool.noul.toFixed(2)}` : ""}  [${page.elements.length} els${a.stages === 2 ? ", 2-stage" : ""}]`);
 
-      if (round > 0 && done >= doneAt && done < 0.85 && act.tool !== "none") {
-        // "done" and "next action" disagree: settle it with a stricter single question
+      if (round > 0 ? done >= doneAt && done < 0.85 && act.tool !== "none" : done >= 0.9) {
+        // "done" and "next action" disagree: settle it with a stricter single question. In round 0
+        // nothing has been done yet, so any "done" is checked (labels like a "Done" button mislead it).
         const c = await this.call({ page, task: { goal, history: history.slice(-12) } }, { complete: { type: "noul", instructions: "Is everything `task.goal` asks for already finished on `page`, so that no further action (such as pressing a submit, search or continue button) is needed?" } });
         r.confirm = +c.answers.complete.noul.toFixed(2);
         log(`     confirm=${r.confirm}`);
         if (r.confirm >= 0.65) { status = "done"; break; }
         if (r.confirm >= 0.45) { status = "likely_done"; info = "the page looks done but Jev is unsure; verify with a check, snapshot or screenshot"; break; }
-        if (a.irreversible.noul >= irreversibleAt && GUARDED.has(act.tool)) {
+        if (act.tool === "none" && a.use_tool?.noul >= 0.5) {
+          // not done after all, and a page tool fits the next step: use it
+          Object.assign(act, this.resolve(page, { ...a, tool: { ...a.tool, choice: "webmcp" } }, values, webmcp));
+          r.tool = act.tool; r.el = actLabel(act);
+        }
+        if (a.irreversible.noul >= irreversibleAt && guarded(act)) {
           // the goal looks mostly done and the next step is hard to undo: stop rather than overstep
           status = "done"; info = "stopped before an action that looks irreversible and may go beyond this goal";
-          pending = { action: act.tool, element: brief(act.el), p_irreversible: r.irreversible };
+          pending = { action: act.tool, element: actLabel(act), p_irreversible: r.irreversible };
           break;
         }
       } else if (done >= (round > 0 ? doneAt : 0.9) && (done >= 0.85 || act.tool === "none" || round === 0)) { status = "done"; break; }
@@ -509,11 +619,11 @@ export class JevBrowser {
         if (++waits > 6) { status = "stuck"; info = "page never finished loading"; break; }
         await this.settle({ max: 4000 }); await sleep(600); history.push({ action: "wait" }); continue;
       }
-      if (TARGETED.has(act.tool) && act.p_target < minTarget) { status = "ambiguous"; info = "target confidence too low; refine the goal or act on a candidate directly"; break; }
-      const seenKey = `${act.tool}|${brief(act.el)}|${["type", "select", "upload"].includes(act.tool) ? act.valueKey : ""}|${page.url}|${page.text}|${JSON.stringify(page.elements)}`;
+      if ((TARGETED.has(act.tool) || act.tool === "webmcp") && act.p_target < minTarget) { status = "ambiguous"; info = "target confidence too low; refine the goal or act on a candidate directly"; break; }
+      const seenKey = `${act.tool}|${actLabel(act)}|${["type", "select", "upload"].includes(act.tool) ? act.valueKey : ""}|${page.url}|${page.text}|${JSON.stringify(page.elements)}`;
       seen.set(seenKey, (seen.get(seenKey) ?? 0) + 1);
       if (seen.get(seenKey) >= 3) { status = "stuck"; info = "repeating the same action on the same page without progress"; break; }
-      const seq = [...history.filter(h => h.action).map(h => `${h.action}|${h.element}|${h.value ?? ""}`), `${act.tool}|${brief(act.el)}|${["type", "select", "upload"].includes(act.tool) ? act.valueKey ?? "" : ""}`];
+      const seq = [...history.filter(h => h.action).map(h => `${h.action}|${h.element}|${h.value ?? ""}`), `${act.tool}|${actLabel(act)}|${["type", "select", "upload"].includes(act.tool) ? act.valueKey ?? "" : ""}`];
       if (repeatsBlock(seq, 2, 3) || repeatsBlock(seq, 3, 3) || repeatsBlock(seq, 1, 8)) { status = "stuck"; info = "repeating the same sequence of actions; the goal may already be done — check the page"; break; }
 
       // follow-up questions only for the chosen action
@@ -533,19 +643,21 @@ export class JevBrowser {
         act.destination = +answers.dest.choice;
         r.destination = brief(page.elements.find(e => e.i === act.destination));
       }
-      if (GUARDED.has(act.tool) && !allowIrreversible && a.irreversible.noul >= irreversibleAt) {
+      if (act.tool === "webmcp" && !act.args) act.args = await this.webmcpArgs(page, goal, history.slice(-12), act, values);
+      if (guarded(act) && !allowIrreversible && a.irreversible.noul >= irreversibleAt) {
         status = "needs_confirmation"; info = "the next action looks hard to undo; call again with allow_irreversible to proceed";
-        pending = { action: act.tool, element: brief(act.el), ...(act.key ? { key: act.key } : {}), p_irreversible: r.irreversible };
+        pending = { action: act.tool, element: actLabel(act), ...(act.argKeys ? { args: act.argKeys } : {}), ...(act.key ? { key: act.key } : {}), p_irreversible: r.irreversible };
         break;
       }
 
-      const h = { action: act.tool, element: brief(act.el) };
+      const h = { action: act.tool, element: actLabel(act) };
+      if (act.argKeys && Object.keys(act.argKeys).length) h.args = act.argKeys;
       if (act.tool === "select" && act.value != null) h.option = act.value;
       if (act.valueKey && ["type", "select", "upload"].includes(act.tool)) h.value = act.valueKey;
       if (act.key) h.key = act.key;
       if (r.destination) h.destination = r.destination;
       if (this.highlight && act.target != null) await this.showDecision(act, r).catch(() => {});
-      try { r.act_ms = await this.act(act); }
+      try { r.act_ms = await this.act(act); if (act.result != null) h.result = act.result; }
       catch (e) { h.error = actionError(e); r.error = h.error; log(`  ! ${h.error}`); }
       history.push(h);
       // A modal/banner covers the target: if an uncovered control plainly says "close", dismiss it
@@ -607,6 +719,22 @@ export class JevBrowser {
       setTimeout(() => box.remove(), 1400);
     }, label);
     await sleep(900);
+  }
+
+  // WebMCP tools the current page registered (name, description, inputSchema, annotations).
+  async webmcpTools() {
+    return this.page.evaluate(() => window.__jevWebmcp?.list() ?? []).catch(() => []);
+  }
+
+  // Run one of the page's WebMCP tools. The page's own code runs; no Jev call, no element picking.
+  async webmcpCall(name, args = {}, { timeout = 30_000 } = {}) {
+    const t0 = Date.now();
+    const r = await this.runWebmcp(name, args, timeout);
+    await this.settle({ max: 4000 });   // a tool may navigate or re-render
+    const out = { tool: name, url: this.page.url(), ms: Date.now() - t0 };
+    if (r.error) out.error = r.error; else out.result = webmcpText(r.result);
+    if (this.events.length) out.events = this.events.splice(0);
+    return out;
   }
 
   async screenshot({ path, fullPage = false } = {}) { return this.page.screenshot({ path, fullPage }); }

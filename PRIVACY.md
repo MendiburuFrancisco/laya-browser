@@ -20,6 +20,8 @@ To decide what to click or type, jev-browser sends requests to the **TypeSafe Sy
   - values whose key names a secret (`password`, `pw`, `pwd`, `token`, `secret`, `otp`, `card`,
     `cvv`, `cvc`, `ssn`, `api_key`, `pin`), which are sent as their key name only;
   - values already typed into password fields, which are replaced by `[redacted]`.
+  - a secret value (4 characters or more) that the page shows back, for example in its text or
+    in a WebMCP tool's result, which is also replaced by `[redacted]`.
 
   The real values are typed locally by Playwright.
 
