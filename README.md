@@ -106,8 +106,9 @@ where Chromium has no native `modelContext`, a minimal one is installed so featu
 still register. `browser_open` lists their names as `webmcp_tools`.
 
 **In `browser_do`, Jev uses them.** Each round, the page's tools are offered next to click, type
-and the rest. When Jev picks one, a follow-up question fills its arguments: each is one of your
-`values` or, for an `enum`, one of its options, because Jev never writes text. The page's own
+and the rest, with a yes/no "can one of the page's tools do the next step?" that decides between
+them. The same request fills every tool's arguments: each is one of your `values` or, for an
+`enum`, one of its options (a list, a priority), because Jev never writes text. The page's own
 `execute` runs, its result goes into the step's history for the "done?" judgement, and the action
 shows as `webmcp tool add_todo {"text":"values.todo"} => "…"`. A tool the site does not mark
 `readOnlyHint` is guarded like a click: if it looks irreversible the step stops with
@@ -206,7 +207,7 @@ await b.close();
 ### Watch it
 
 ```bash
-node examples/webmcp-demo.mjs        # headed: plain browser_do goals, Jev calls the page's WebMCP tools
+node examples/webmcp-demo.mjs        # headed: 9 plain goals on a planner; Jev picks page tools or clicks, ~16 s
 node examples/x-profile-demo.mjs     # headed, read-only x.com walkthrough with decision highlights
 ```
 
