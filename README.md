@@ -54,10 +54,32 @@ Known limits, so write steps around them:
 - **Judgements that compare many values** (is this table sorted, did exactly one thing change)
   → verify with `browser_check` or `browser_snapshot`.
 
+## Quick start (Claude Code plugin)
+
+```
+/plugin install jev-browser --marketplace Ying-Kai-Liao/jev-browser
+```
+
+On older Claude Code versions, add the marketplace first:
+
+```
+/plugin marketplace add Ying-Kai-Liao/jev-browser
+/plugin install jev-browser@jev-browser
+```
+
+Claude Code then asks for your TypeSafe API key, which goes to its secure credential store. It
+also offers two optional settings: show the browser window, and a persistent profile directory
+so that logins survive restarts. The plugin runs the MCP server below, pinned to the same
+version, and adds a skill that teaches Claude how to write steps and handle each status. The
+first browser call downloads Chromium for Playwright if it is missing (one time, about 30 s).
+
+Data: see [Privacy](#privacy). Page content goes to the TypeSafe API; passwords and other
+secrets you pass in `values` don't.
+
 ## Quick start (MCP, from npm)
 
 ```bash
-npx playwright install chromium          # once
+npx playwright install chromium          # once (the server also does this on first use)
 claude mcp add jev-browser -e TYPESAFE_API_KEY=your-key -- npx -y -p jev-browser jev-browser-mcp
 ```
 
@@ -164,7 +186,10 @@ and in a diff. Measured on a Wikipedia article (1,840 elements), a default snaps
 `diff` after a scroll to ~50.
 
 Env: `JEV_BROWSER_HEADED=1` shows the browser, `JEV_BROWSER_PROFILE=/dir` keeps a persistent
-profile (logins survive restarts), `JEV_BROWSER_LOG=1` prints per-round decisions to stderr.
+profile (logins survive restarts), `JEV_BROWSER_LOG=1` prints per-round decisions to stderr,
+and `JEV_BROWSER_NO_INSTALL=1` turns off the Chromium download on first use. The MCP server
+reads `TYPESAFE_API_KEY` from its environment, or from the `.env` of a source checkout, but
+never from the `.env` of the directory it was started in.
 
 ### Library
 
@@ -255,6 +280,10 @@ src/prune.mjs        pure helpers: split page text into blocks, batch, rank, rea
 src/jev.mjs          System One API client
 src/flow.mjs         JSON flow runner
 bin/                 CLI and MCP server
+.claude-plugin/      Claude Code plugin manifest and the repo's own marketplace
+.mcp.json            the plugin's MCP server: npx jev-browser@<version>, key from plugin settings
+skills/jev-browser/  skill the plugin adds: how to write steps and handle each status
+scripts/             keeps plugin.json and .mcp.json on package.json's version
 bin/jev-cost.mjs     two-sided token ledger: caller tokens vs Jev tokens, measured per scenario
 bench/               tasks with ground-truth checks, runner, context-cost estimate
 test/                offline fixture tests, MCP end-to-end test
@@ -272,8 +301,31 @@ npm version patch            # or minor / major: commits and tags vX.Y.Z
 git push --follow-tags
 ```
 
+`npm version` also sets the version in `.claude-plugin/plugin.json` and the pinned
+`jev-browser@X.Y.Z` in `.mcp.json`, so the plugin always launches the release it ships with.
+CI checks that the three agree and runs `claude plugin validate . --strict` (`npm run validate`
+does both locally). Plugin users get the new version when the marketplace repo updates; the
+directory listing picks it up from the tracked branch.
+
 Publishing uses npm trusted publishing, set up once with
 `npx npm@latest trust github jev-browser --file release.yml --repo Ying-Kai-Liao/jev-browser --allow-publish`.
+
+## Privacy
+
+jev-browser runs locally. It has no server of its own and collects no telemetry. To decide
+each action it sends the following to the TypeSafe System One API (`api.typesafe.ai`), using
+your key:
+
+- the current page's URL, title, visible text and interactive elements, as well as the text
+  blocks `browser_read` ranks;
+- the step's `goal`, recent action history, and your `browser_check` and `browser_choose`
+  questions;
+- the `values` you pass, **except** those whose key names a secret (`password`, `pw`, `token`,
+  `secret`, `otp`, `card`, `cvv`, `cvc`, `ssn`, `api_key`, `pin`). Those are shown by key only.
+  Values typed into password fields are also redacted.
+
+Playwright types the real values locally. TypeSafe's handling of this data is covered by its
+own terms. Screenshots and snapshots go only to your MCP client. See [PRIVACY.md](PRIVACY.md).
 
 ## License
 

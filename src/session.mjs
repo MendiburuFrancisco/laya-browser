@@ -12,7 +12,7 @@
 import { chromium } from "playwright";
 import { jev } from "./jev.mjs";
 import { ENUMERATE, EXTRACT_BLOCKS } from "./page-script.mjs";
-import { FIELDISH, SELECTISH, FILEISH, brief, pickCloser, pageDiff, repeatedElements, formatPage, formatDiff, redactPage } from "./page-model.mjs";
+import { FIELDISH, SELECTISH, FILEISH, brief, pickCloser, pageDiff, repeatedElements, formatPage, formatDiff, redactPage, redactValues } from "./page-model.mjs";
 import { normalizeBlocks, batchBlocks, batchQuestions, pickBlocks, readResult, totalChars, MIN_PRUNE_CHARS, BUDGET_CHARS, DROP_BELOW, MAX_JEV_CALLS } from "./prune.mjs";
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -185,7 +185,7 @@ export class JevBrowser {
   }
 
   async call(state, questions) {
-    const r = await jev(state, questions);
+    const r = await jev(state.page ? { ...state, page: redactPage(state.page) } : state, questions);
     this.stats.calls++; this.stats.jev_ms += r.ms; this.stats.tokens += r.tokens;
     return r;
   }
@@ -274,6 +274,7 @@ export class JevBrowser {
   }
 
   async decide(page, goal, values, history, lastChange) {
+    values = redactValues(values);   // what Jev sees; resolve() types the real value
     const task = { goal, ...(Object.keys(values).length ? { values } : {}), history, ...(lastChange ? { last_change: lastChange } : {}) };
     const withValues = Object.keys(values).length ? ", with the given `task.values`" : "";
     const common = {
@@ -461,7 +462,7 @@ export class JevBrowser {
       await this.settle();
       page = await this.snapshot();
       if (this.events.length) history.push(...this.events.splice(0).map(e => ({ event: e })));
-      const a = await this.decide(page, goal, values, history.slice(-12), round ? pageDiff(prevPage, page) : undefined);
+      const a = await this.decide(page, goal, values, history.slice(-12), round ? pageDiff(redactPage(prevPage), redactPage(page)) : undefined);
       prevPage = page;
       const act = this.resolve(page, a, values);
       const done = Math.max(a.done.noul, a.done_change?.noul ?? 0);
