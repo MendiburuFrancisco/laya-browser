@@ -144,3 +144,21 @@ test("browser_do: no page tools, no webmcp action offered", async () => {
   assert.equal(sent[0].questions.webmcp_tool, undefined);
   assert.equal(sent[0].state.page.webmcp_tools, undefined);
 });
+
+test("browser_do: arguments ride in the decide request, so a tool call costs no extra Jev call", async () => {
+  await b.open(`${base}/current`);
+  const sent = stubJev(b, r => r === 0 ? { tool: "webmcp", webmcp_tool: "add_todo", t0a0: "todo" } : { done: 0.95, done_change: 0.95, tool: "none" });
+  const r = await b.do("Add it", { values: { other: "x", todo: "buy milk" } });
+  delete b.call;
+  assert.equal(r.actions[0].result, "added buy milk");
+  assert.equal(sent.length, 2);   // two rounds, no follow-up
+  assert.ok(sent[0].questions.t0a0 && sent[0].questions.use_tool);
+});
+
+test("browser_do: when Jev says a page tool fits, it is used even if click was the top action", async () => {
+  await b.open(`${base}/current`);
+  stubJev(b, r => r === 0 ? { tool: "click", use_tool: 0.8, webmcp_tool: "add_todo", t0a0: "todo" } : { done: 0.95, done_change: 0.95, tool: "none" });
+  const r = await b.do("Add it", { values: { todo: "buy milk" } });
+  delete b.call;
+  assert.equal(r.actions[0].action, "webmcp");
+});
