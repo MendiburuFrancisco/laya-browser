@@ -12,7 +12,7 @@
 import { chromium } from "playwright";
 import { jev } from "./jev.mjs";
 import { ENUMERATE, EXTRACT_BLOCKS } from "./page-script.mjs";
-import { FIELDISH, SELECTISH, FILEISH, brief, pageDiff, repeatedElements, formatPage, formatDiff, redactPage } from "./page-model.mjs";
+import { FIELDISH, SELECTISH, FILEISH, brief, pickCloser, pageDiff, repeatedElements, formatPage, formatDiff, redactPage } from "./page-model.mjs";
 import { normalizeBlocks, batchBlocks, batchQuestions, pickBlocks, readResult, totalChars, MIN_PRUNE_CHARS, BUDGET_CHARS, DROP_BELOW, MAX_JEV_CALLS } from "./prune.mjs";
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -455,7 +455,7 @@ export class JevBrowser {
     const t0 = Date.now(); const calls0 = this.stats.calls;
     const history = []; const rounds = [];
     let prevPage = null, waits = 0, page = null, status = "max_actions", info, pending, retried = false;
-    const seen = new Map();
+    const seen = new Map(), dismissed = new Map();   // url -> dismiss attempts
     this.promptText = values.prompt;
     for (let round = 0; round <= maxActions; round++) {
       await this.settle();
@@ -547,6 +547,30 @@ export class JevBrowser {
       try { r.act_ms = await this.act(act); }
       catch (e) { h.error = actionError(e); r.error = h.error; log(`  ! ${h.error}`); }
       history.push(h);
+      // A modal/banner covers the target: if an uncovered control plainly says "close", dismiss it
+      // so the next round can retry (Jev keeps picking the covered target otherwise). At most two
+      // attempts per URL; if the target is still covered afterwards, say so in the history.
+      if (h.error?.startsWith("click blocked") && (dismissed.get(page.url) ?? 0) < 2) {
+        // re-read the page: the overlay often appeared after the snapshot this round decided on
+        const now = await this.snapshot().catch(() => null);
+        const closer = now && pickCloser(now.elements, now.url);
+        if (closer) {
+          dismissed.set(now.url, (dismissed.get(now.url) ?? 0) + 1);
+          const d = { action: "dismiss_overlay", element: `${closer.tag} "${String(closer.text || closer.label || closer.hint).slice(0, 50)}"` };
+          const before = this.page.url();
+          try {
+            await this.act({ tool: "click", target: closer.i }); await this.settle({ max: 2000 });
+            if (this.page.url() !== before) d.navigated = this.page.url();
+            else {
+              const after = await this.snapshot().catch(() => null);
+              const target = after?.elements.find(e => brief(e) === brief(act.el) && (e.near ?? "") === (act.el?.near ?? ""));
+              if (target?.covered) d.still_covered = true;
+            }
+          } catch (e) { d.error = actionError(e); }
+          log(`  ~ dismiss_overlay ${d.element}${d.error ? ` ! ${d.error}` : ""}${d.still_covered ? " (target still covered)" : ""}`);
+          history.push(d);
+        }
+      }
       if (this.heldDialog) {
         status = "needs_confirmation"; info = "the action opened a confirmation dialog that looks hard to undo, so it was dismissed; call again with allow_irreversible to accept it";
         pending = { action: h.action, element: h.element, dialog: this.heldDialog.message, p_irreversible: this.heldDialog.p_irreversible };
