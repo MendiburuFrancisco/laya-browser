@@ -28,7 +28,7 @@ const fail = e => ({ isError: true, content: [{ type: "text", text: String(e?.me
 const wrap = fn => async args => { try { return await fn(args); } catch (e) { return fail(e); } };
 const stderrLog = process.env.JEV_BROWSER_LOG === "1" ? s => process.stderr.write(s + "\n") : () => {};
 
-const server = new McpServer({ name: "jev-browser", version: "0.7.0" });
+const server = new McpServer({ name: "jev-browser", version: "0.2.0" });
 
 server.registerTool("browser_open", {
   title: "Open URL",
