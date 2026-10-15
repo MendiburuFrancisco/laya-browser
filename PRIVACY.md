@@ -9,7 +9,9 @@ crash reports.
 ## What leaves your machine
 
 To decide what to click or type, jev-browser sends requests to the **TypeSafe System One API**
-(`https://api.typesafe.ai`, model "Jev"), using the API key you provide. A request can contain:
+(`https://api.typesafe.ai`, model "Jev"), using the API key you provide. If you provide an
+OpenRouter key instead, the same requests go to **OpenRouter** (`https://openrouter.ai`), which
+passes them to TypeSafe. A request can contain:
 
 - **Page content** of the page the browser is on: URL, title, visible text, and the interactive
   elements (their labels, text, placeholders, names, link targets and current values). For
@@ -26,7 +28,8 @@ To decide what to click or type, jev-browser sends requests to the **TypeSafe Sy
   The real values are typed locally by Playwright.
 
 TypeSafe processes these requests under its own terms and privacy policy
-(<https://docs.typesafe.ai>). jev-browser is not affiliated with TypeSafe.
+(<https://docs.typesafe.ai>), and OpenRouter, when used, under its own
+(<https://openrouter.ai/privacy>). jev-browser is not affiliated with either.
 
 The browser also loads the websites you or your AI client direct it to, as any browser does.
 
@@ -35,8 +38,8 @@ The browser also loads the websites you or your AI client direct it to, as any b
 - **Screenshots and snapshots.** They are returned only to your MCP client, such as Claude Code.
   What that client does with them is governed by its own policy.
 - **Your API key.** As a Claude Code plugin, the key is kept in Claude Code's secure credential
-  store and passed to the local server as an environment variable. It is sent only to TypeSafe,
-  as the `Authorization` header.
+  store and passed to the local server as an environment variable. It is sent only to TypeSafe
+  (or OpenRouter, for an OpenRouter key), as the `Authorization` header.
 - **Browser data.** Cookies and logins live in a temporary profile that is discarded when the
   session ends, unless you set a persistent profile directory. In that case they stay in that
   directory.

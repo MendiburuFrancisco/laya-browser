@@ -73,13 +73,13 @@ On older Claude Code versions, add the marketplace first:
 /plugin install jev-browser@jev-browser
 ```
 
-Claude Code then asks for your TypeSafe API key, which goes to its secure credential store. It
+Claude Code then asks for your TypeSafe API key (or an OpenRouter key), which goes to its secure credential store. It
 also offers two optional settings: show the browser window, and a persistent profile directory
 so that logins survive restarts. The plugin runs the MCP server below, pinned to the same
 version, and adds a skill that teaches Claude how to write steps and handle each status. The
 first browser call downloads Chromium for Playwright if it is missing (one time, about 30 s).
 
-Data: see [Privacy](#privacy). Page content goes to the TypeSafe API; passwords and other
+Data: see [Privacy](#privacy). Page content goes to the TypeSafe API (or OpenRouter); passwords and other
 secrets you pass in `values` don't.
 
 ## Quick start (MCP, from npm)
@@ -92,13 +92,17 @@ claude mcp add jev-browser -e TYPESAFE_API_KEY=your-key -- npx -y -p jev-browser
 Any MCP client works the same way: command `npx`, args `-y -p jev-browser jev-browser-mcp`,
 env `TYPESAFE_API_KEY`. Add `JEV_BROWSER_HEADED=1` to watch it work.
 
+No TypeSafe account? Jev is also on [OpenRouter](https://openrouter.ai/typesafe/jev-1.13): pass
+`-e OPENROUTER_API_KEY=your-key` instead, and calls are billed to your OpenRouter account. When both
+keys are set, `TYPESAFE_API_KEY` wins. `JEV_API_URL` and `JEV_MODEL` override the endpoint and model.
+
 ## Setup (from source)
 
 ```bash
 git clone https://github.com/Ying-Kai-Liao/jev-browser && cd jev-browser
 npm install
 npm run setup                    # downloads Chromium for Playwright
-cp .env.example .env             # add TYPESAFE_API_KEY
+cp .env.example .env             # add TYPESAFE_API_KEY or OPENROUTER_API_KEY
 npm test                         # offline tests (no network, no key)
 npm run test:e2e                 # MCP server end to end (network + key)
 ```
@@ -109,7 +113,7 @@ npm run test:e2e                 # MCP server end to end (network + key)
 claude mcp add jev-browser -- node /absolute/path/to/jev-browser/bin/jev-browser-mcp.mjs
 ```
 
-From a source checkout the server reads `TYPESAFE_API_KEY` from the repo's `.env`.
+From a source checkout the server reads `TYPESAFE_API_KEY` (or `OPENROUTER_API_KEY`) from the repo's `.env`.
 
 | tool | purpose |
 |---|---|
@@ -218,7 +222,7 @@ and in a diff. Measured on a Wikipedia article (1,840 elements), a default snaps
 Env: `JEV_BROWSER_HEADED=1` shows the browser, `JEV_BROWSER_PROFILE=/dir` keeps a persistent
 profile (logins survive restarts), `JEV_BROWSER_LOG=1` prints per-round decisions to stderr,
 and `JEV_BROWSER_NO_INSTALL=1` turns off the Chromium download on first use. The MCP server
-reads `TYPESAFE_API_KEY` from its environment, or from the `.env` of a source checkout, but
+reads `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` from its environment, or from the `.env` of a source checkout, but
 never from the `.env` of the directory it was started in.
 
 ### Library
@@ -346,8 +350,8 @@ Publishing uses npm trusted publishing, set up once with
 ## Privacy
 
 jev-browser runs locally. It has no server of its own and collects no telemetry. To decide
-each action it sends the following to the TypeSafe System One API (`api.typesafe.ai`), using
-your key:
+each action it sends the following to the TypeSafe System One API (`api.typesafe.ai`), or to
+OpenRouter (`openrouter.ai`) when you use an OpenRouter key, using your key:
 
 - the current page's URL, title, visible text and interactive elements, as well as the text
   blocks `browser_read` ranks;
@@ -358,8 +362,8 @@ your key:
   Values typed into password fields are also redacted, and so is a secret value the page
   shows back (in its text or a WebMCP tool's result).
 
-Playwright types the real values locally. TypeSafe's handling of this data is covered by its
-own terms. Screenshots and snapshots go only to your MCP client. See [PRIVACY.md](PRIVACY.md).
+Playwright types the real values locally. TypeSafe's (and OpenRouter's) handling of this data
+is covered by their own terms. Screenshots and snapshots go only to your MCP client. See [PRIVACY.md](PRIVACY.md).
 
 ## License
 
