@@ -58,10 +58,14 @@ server.registerTool("browser_open", {
   title: "Open URL",
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   description: "Navigate the browser session to a URL and wait until the page settles. Starts the browser on first use.",
-  inputSchema: { url: z.string().describe("Absolute URL") },
-}, wrap(async ({ url }) => {
+  inputSchema: {
+    url: z.string().describe("Absolute URL"),
+    viewport: z.string().regex(/^\d{2,5}x\d{2,5}$/).optional().describe("Window size WIDTHxHEIGHT, e.g. 390x844 to check a page's phone layout. Kept for later calls; default 1280x800"),
+  },
+}, wrap(async ({ url, viewport }) => {
   const b = await browser();
-  const r = await b.open(url);
+  const r = await b.open(url, { viewport });
+  if (viewport) r.viewport = `${b.viewport.width}x${b.viewport.height}`;
   const page = await b.snapshot();
   const webmcp = (await b.webmcpTools()).map(t => t.name);
   return text({ ...r, elements: page.elements.length, visible_text: page.text.slice(0, 400), ...(webmcp.length ? { webmcp_tools: webmcp } : {}) });
