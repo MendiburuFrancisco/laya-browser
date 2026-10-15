@@ -13,7 +13,7 @@ import { promisify } from "node:util";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { JevBrowser } from "../src/session.mjs";
+import { JevBrowser, VIEWPORT_RE } from "../src/session.mjs";
 import { formatRead } from "../src/prune.mjs";
 
 process.env.JEV_BROWSER_MCP = "1";   // src/jev.mjs: don't read the working directory's .env
@@ -60,7 +60,7 @@ server.registerTool("browser_open", {
   description: "Navigate the browser session to a URL and wait until the page settles. Starts the browser on first use.",
   inputSchema: {
     url: z.string().describe("Absolute URL"),
-    viewport: z.string().regex(/^\d{2,5}x\d{2,5}$/).optional().describe("Window size WIDTHxHEIGHT, e.g. 390x844 to check a page's phone layout. Kept for later calls; default 1280x800"),
+    viewport: z.string().regex(VIEWPORT_RE).optional().describe("Window size WIDTHxHEIGHT, e.g. 390x844 to check a page's phone layout. Kept for later calls; default 1280x800"),
   },
 }, wrap(async ({ url, viewport }) => {
   const b = await browser();

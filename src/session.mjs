@@ -18,9 +18,10 @@ import { normalizeBlocks, batchBlocks, batchQuestions, pickBlocks, readResult, t
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// "390x844" -> { width: 390, height: 844 }; anything else throws.
+// "390x844" -> { width: 390, height: 844 }; anything else throws. The MCP schema uses the same pattern.
+export const VIEWPORT_RE = /^(\d{2,5})x(\d{2,5})$/;
 export function parseViewport(s) {
-  const m = /^\s*(\d{2,5})\s*x\s*(\d{2,5})\s*$/i.exec(String(s ?? ""));
+  const m = VIEWPORT_RE.exec(String(s ?? ""));
   if (!m) throw new Error(`viewport must look like 390x844, got "${s}"`);
   return { width: Number(m[1]), height: Number(m[2]) };
 }
@@ -149,12 +150,12 @@ export class JevBrowser {
     return Date.now() - t0;
   }
 
-  // viewport: { width, height } or "390x844"; it sticks for later pages and new tabs.
+  // viewport: { width, height } or "390x844"; it sticks for later pages and every tab, open or new.
   async open(url, { viewport } = {}) {
     const t0 = Date.now();
     if (viewport) {
       this.viewport = typeof viewport === "string" ? parseViewport(viewport) : viewport;
-      await this.page.setViewportSize(this.viewport);
+      await Promise.all(this.context.pages().map(p => p.setViewportSize(this.viewport)));
     }
     await this.page.goto(url, { waitUntil: "commit", timeout: 30_000 });
     await this.page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});

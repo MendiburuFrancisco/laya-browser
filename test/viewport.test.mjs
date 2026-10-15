@@ -25,8 +25,8 @@ const width = () => b.page.evaluate(() => innerWidth);
 
 test("parseViewport reads WIDTHxHEIGHT and rejects the rest", () => {
   assert.deepEqual(parseViewport("390x844"), { width: 390, height: 844 });
-  assert.deepEqual(parseViewport(" 1024 X 768 "), { width: 1024, height: 768 });
-  for (const bad of ["", "390", "390x", "x844", "390*844", "-390x844", undefined]) assert.throws(() => parseViewport(bad), /390x844/);
+  assert.deepEqual(parseViewport("1024x768"), { width: 1024, height: 768 });
+  for (const bad of ["", "390", "390x", "x844", "390*844", "-390x844", " 390x844", "390X844", undefined]) assert.throws(() => parseViewport(bad), /390x844/);
 });
 
 test("default size is 1280x800 and shows the desktop layout", async () => {
@@ -54,6 +54,13 @@ test("a new tab gets the same size", async () => {
   await p.waitForLoadState();
   await p.waitForFunction(() => innerWidth === 414);
   assert.deepEqual(p.viewportSize(), { width: 414, height: 896 });
+});
+
+test("a tab opened earlier is resized too, so switching back to it keeps the size", async () => {
+  const other = b.context.pages().find(p => p !== b.page);
+  await other.setViewportSize({ width: 800, height: 600 });
+  await b.open(base, { viewport: "500x700" });
+  for (const p of b.context.pages()) assert.deepEqual(p.viewportSize(), { width: 500, height: 700 });
 });
 
 test("a malformed viewport fails before navigating", async () => {
