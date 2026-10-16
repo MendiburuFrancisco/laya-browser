@@ -15,9 +15,16 @@
     "typesafe_api_key": {
       "type": "string",
       "title": "TypeSafe API key",
-      "description": "Key for the TypeSafe System One API (Jev), from https://docs.typesafe.ai. Calls are billed to this key.",
+      "description": "Key for the TypeSafe System One API (Jev), from https://docs.typesafe.ai. Calls are billed to this key. Set this or the OpenRouter key.",
       "sensitive": true,
-      "required": true
+      "default": ""
+    },
+    "openrouter_api_key": {
+      "type": "string",
+      "title": "OpenRouter API key",
+      "description": "Use Jev through OpenRouter instead, billed to your OpenRouter account (https://openrouter.ai/keys). Used only when no TypeSafe key is set.",
+      "sensitive": true,
+      "default": ""
     },
     "headed": {
       "type": "boolean",
