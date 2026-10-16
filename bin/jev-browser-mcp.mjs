@@ -146,8 +146,8 @@ server.registerTool("browser_act", {
   description: "Perform one action on an element number from the latest browser_snapshot (or from browser_do candidates). No decision model involved. Numbers are matched to the current page; if the element is gone, take a new snapshot. Confirm/prompt dialogs the action opens are dismissed unless accept_dialog is true.",
   inputSchema: {
     action: z.enum(["click", "type", "press_enter", "press_key", "select", "hover", "right_click", "drag", "upload", "scroll", "back"]),
-    element: z.number().int().optional().describe("Element number [i]; not needed for scroll/back/page-level press_key"),
-    value: z.string().optional().describe("Text to type, option label to select, or file path to upload"),
+    element: z.number().int().optional().describe("Element number [i]; not needed for back/page-level press_key. For scroll, optional: scrolls the box that contains it instead of the page's main scrollable area"),
+    value: z.string().optional().describe("Text to type, option label to select, file path to upload, or up/down for scroll (default down)"),
     key: z.string().optional().describe("Key for press_key, e.g. Escape"),
     destination: z.number().int().optional().describe("Drop target element number for drag"),
     accept_dialog: z.boolean().optional().describe("Accept a confirm/prompt dialog this action opens (e.g. \"Delete this item?\"). Default: dismiss"),
