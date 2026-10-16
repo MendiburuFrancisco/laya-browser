@@ -118,7 +118,7 @@ export class JevBrowser {
     const untrack = r => this.inflight.delete(r);
     context.on("request", track); context.on("requestfinished", untrack); context.on("requestfailed", untrack);
     context.on("page", p => {
-      if (this.viewport) p.setViewportSize(this.viewport).catch(() => {});
+      if (this.viewport) this.resize(p).catch(() => {});
       if (this._page && p !== this._page) { this.events.push(`new tab opened: ${p.url()}`); this.page = p; }
     });
   }
@@ -155,12 +155,32 @@ export class JevBrowser {
     const t0 = Date.now();
     if (viewport) {
       this.viewport = typeof viewport === "string" ? parseViewport(viewport) : viewport;
-      await Promise.all(this.context.pages().map(p => p.setViewportSize(this.viewport)));
+      await Promise.all(this.context.pages().map(p => this.resize(p)));
     }
     await this.page.goto(url, { waitUntil: "commit", timeout: 30_000 });
     await this.page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
     await this.settle();
     return { url: this.page.url(), title: await this.page.title(), ms: Date.now() - t0 };
+  }
+
+  // Headless Chromium refuses to resize a window that isn't in its normal state, and a page puts it
+  // in fullscreen on its own (a "full screen" button, a video player's iframe). Restore the window
+  // itself: the window goes fullscreen before document.fullscreenElement is set, so right after the
+  // click document.exitFullscreen() would find nothing to exit.
+  async resize(p) {
+    try {
+      await p.setViewportSize(this.viewport);
+    } catch (e) {
+      if (!/normal state/.test(e.message)) throw e;
+      const cdp = await this.context.newCDPSession(p);
+      try {
+        const { windowId } = await cdp.send("Browser.getWindowForTarget");
+        await cdp.send("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal" } });
+      } finally {
+        await cdp.detach().catch(() => {});
+      }
+      await p.setViewportSize(this.viewport);
+    }
   }
 
   async snapshot() {

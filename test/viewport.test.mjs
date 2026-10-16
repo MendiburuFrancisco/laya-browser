@@ -9,6 +9,8 @@ const PAGES = {
   "/": `<!doctype html><meta name="viewport" content="width=device-width"><title>Size</title>
     <style>#m { display: none } @media (max-width: 600px) { #m { display: block } #d { display: none } }</style>
     <p id="m">phone layout</p><p id="d">desktop layout</p><a href="/" target="_blank">tab</a>`,
+  "/fullscreen": `<!doctype html><button onclick="document.documentElement.requestFullscreen()">Full screen</button>`,
+  "/player": `<!doctype html><iframe src="/fullscreen" allow="fullscreen"></iframe>`,
 };
 
 let server, base, browser, b;
@@ -61,6 +63,19 @@ test("a tab opened earlier is resized too, so switching back to it keeps the siz
   await other.setViewportSize({ width: 800, height: 600 });
   await b.open(base, { viewport: "500x700" });
   for (const p of b.context.pages()) assert.deepEqual(p.viewportSize(), { width: 500, height: 700 });
+});
+
+test("a page that went fullscreen (its own button or a video player's iframe) is still resized", async () => {
+  for (const [path, button] of [["/fullscreen", p => p.locator("button")], ["/player", p => p.frameLocator("iframe").locator("button")]]) {
+    for (const wait of [false, true]) {   // right after the click, and once the page reports fullscreen
+      await b.open(base + path);
+      await button(b.page).click();
+      if (wait) await b.page.waitForFunction(() => !!document.fullscreenElement);
+      await b.open(base, { viewport: "360x640" });
+      assert.equal(await width(), 360, `${path}, wait=${wait}`);
+      assert.equal(await b.page.evaluate(() => document.fullscreenElement), null, `${path}, wait=${wait}`);
+    }
+  }
 });
 
 test("a malformed viewport fails before navigating", async () => {
