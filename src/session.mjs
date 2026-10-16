@@ -18,6 +18,14 @@ import { normalizeBlocks, batchBlocks, batchQuestions, pickBlocks, readResult, t
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// "390x844" -> { width: 390, height: 844 }; anything else throws. The MCP schema uses the same pattern.
+export const VIEWPORT_RE = /^(\d{2,5})x(\d{2,5})$/;
+export function parseViewport(s) {
+  const m = VIEWPORT_RE.exec(String(s ?? ""));
+  if (!m) throw new Error(`viewport must look like 390x844, got "${s}"`);
+  return { width: Number(m[1]), height: Number(m[2]) };
+}
+
 export const TOOLS = {
   click: "Click the target (link, button, checkbox, radio, tab, menu item)",
   type: "Type one of the given `values` into the target text field, replacing its content",
@@ -109,7 +117,10 @@ export class JevBrowser {
     const track = r => ["fetch", "xhr", "document"].includes(r.resourceType()) && this.inflight.set(r, Date.now());
     const untrack = r => this.inflight.delete(r);
     context.on("request", track); context.on("requestfinished", untrack); context.on("requestfailed", untrack);
-    context.on("page", p => { if (this._page && p !== this._page) { this.events.push(`new tab opened: ${p.url()}`); this.page = p; } });
+    context.on("page", p => {
+      if (this.viewport) p.setViewportSize(this.viewport).catch(() => {});
+      if (this._page && p !== this._page) { this.events.push(`new tab opened: ${p.url()}`); this.page = p; }
+    });
   }
 
   get page() { return this._page; }
@@ -139,8 +150,13 @@ export class JevBrowser {
     return Date.now() - t0;
   }
 
-  async open(url) {
+  // viewport: { width, height } or "390x844"; it sticks for later pages and every tab, open or new.
+  async open(url, { viewport } = {}) {
     const t0 = Date.now();
+    if (viewport) {
+      this.viewport = typeof viewport === "string" ? parseViewport(viewport) : viewport;
+      await Promise.all(this.context.pages().map(p => p.setViewportSize(this.viewport)));
+    }
     await this.page.goto(url, { waitUntil: "commit", timeout: 30_000 });
     await this.page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
     await this.settle();

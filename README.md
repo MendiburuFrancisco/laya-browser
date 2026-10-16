@@ -113,7 +113,7 @@ From a source checkout the server reads `TYPESAFE_API_KEY` from the repo's `.env
 
 | tool | purpose |
 |---|---|
-| `browser_open(url)` | navigate and wait for the page to settle |
+| `browser_open(url, viewport?)` | navigate and wait for the page to settle; `viewport: "390x844"` resizes the window (e.g. to check a phone layout) and the size sticks for later calls |
 | `browser_do(goal, values?, max_actions?, allow_irreversible?, explain?)` | work toward one outcome; returns a status |
 | `browser_check(question)` | yes/no about the page → `p_yes` |
 | `browser_choose(question, options)` | pick among given options → distribution |
