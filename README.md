@@ -122,7 +122,7 @@ From a source checkout the server reads `TYPESAFE_API_KEY` (or `OPENROUTER_API_K
 | `browser_check(question)` | yes/no about the page → `p_yes` |
 | `browser_choose(question, options)` | pick among given options → distribution |
 | `browser_snapshot(diff?, interactive?, filter?, urls?, max_chars?)` | compact numbered element list, for taking over; the options below narrow it |
-| `browser_act(action, element, value?, key?, destination?, accept_dialog?)` | act on an element directly, no model; confirm/prompt dialogs are dismissed unless `accept_dialog` |
+| `browser_act(action, element, value?, key?, destination?, accept_dialog?)` | act on an element directly, no model; confirm/prompt dialogs are dismissed unless `accept_dialog`. `scroll` moves the page's main scrollable area (or the box around `element`) by most of a screen, `value: "up"` goes back, and the reply says how far it `scrolled` |
 | `browser_read(question, max_chars?)` | the page text that helps answer a question; Jev drops the rest |
 | `browser_screenshot(full_page?)` | PNG image |
 | `browser_close()` | end the session |

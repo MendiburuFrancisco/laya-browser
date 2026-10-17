@@ -51,6 +51,38 @@ const guarded = act => GUARDED.has(act.tool) || (act.tool === "webmcp" && !act.r
 const ARG_SKIP = "(leave out)";
 const MAX_INLINE_ARGS = 24;   // argument questions carried in the decide() request
 const actLabel = act => act.tool === "webmcp" ? `tool ${act.webmcp}` : brief(act.el);
+// In-page helpers for scroll(). A box scrolls if its overflow allows it and its content is taller.
+const SCROLL_BOX_MAIN = () => {
+  const scrolls = el => /(auto|scroll|overlay)/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight + 1;
+  const doc = document.scrollingElement;
+  if (doc && doc.scrollHeight > innerHeight + 1 && getComputedStyle(document.body).overflowY !== "hidden" && getComputedStyle(doc).overflowY !== "hidden") return { h: innerHeight };
+  let best = null;
+  for (const el of document.querySelectorAll("body *")) {
+    if (!scrolls(el)) continue;
+    const r = el.getBoundingClientRect();
+    const w = Math.min(r.right, innerWidth) - Math.max(r.left, 0), h = Math.min(r.bottom, innerHeight) - Math.max(r.top, 0);
+    if (w > 0 && h > 0 && (!best || w * h > best.area)) best = { area: w * h, h, x: Math.max(r.left, 0) + w / 2, y: Math.max(r.top, 0) + h / 2 };
+  }
+  return best ? { h: best.h, x: best.x, y: best.y } : {};
+};
+// the visible part of the nearest box that scrolls, el itself or around it; none: the document
+const SCROLL_BOX_OF = el => {
+  for (let n = el; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+    const st = getComputedStyle(n);
+    if (/(auto|scroll|overlay)/.test(st.overflowY) && n.scrollHeight > n.clientHeight + 1) {
+      const r = n.getBoundingClientRect();
+      const w = Math.min(r.right, innerWidth) - Math.max(r.left, 0), h = Math.min(r.bottom, innerHeight) - Math.max(r.top, 0);
+      if (w > 0 && h > 0) return { h, x: Math.max(r.left, 0) + w / 2, y: Math.max(r.top, 0) + h / 2 };
+    }
+  }
+  return { h: innerHeight };
+};
+// how far everything in the frame is scrolled, summed: changes whichever box moved
+const SCROLL_OFFSET = () => {
+  let sum = scrollY;
+  for (const el of document.querySelectorAll("body *")) if (el.scrollTop) sum += el.scrollTop;
+  return sum;
+};
 // dialog policies: dialog -> accept? Alerts and "leave page?" carry no decision; confirm/prompt may.
 export const SAFE_DIALOGS = d => ["alert", "beforeunload"].includes(d.type());
 export const ACCEPT_DIALOGS = () => true;
@@ -495,7 +527,7 @@ export class JevBrowser {
         await loc.setInputFiles(String(act.value), o);
         break;
       }
-      case "scroll": await this.page.mouse.wheel(0, 700); break;
+      case "scroll": act.scrolled = await this.scroll(act.direction, act.scrollTarget); break;
       case "wait": await sleep(1000); break;
       case "back": await this.page.goBack({ timeout: 10_000 }).catch(() => {}); break;
       case "none": break;
@@ -508,6 +540,42 @@ export class JevBrowser {
       default: throw new Error(`unknown action ${act.tool}`);
     }
     return Date.now() - t;
+  }
+
+  // A wheel scrolls whatever is under the mouse, and Playwright's mouse sits wherever the last action
+  // left it, (0, 0) at first. So aim it: at the scrollable box around the target element when one is
+  // given, else at the largest visible scrollable area (the document on most sites, an inner column
+  // on app-like layouts). One step is 80% of that area's visible height, like Page Down, so no line
+  // is skipped. Returns the distance moved, once the scroll has landed: the wheel is asynchronous
+  // and settle() doesn't see it (no request, no DOM change).
+  async scroll(direction = "down", target) {
+    const frame = target != null ? (this.frames.get(target) ?? this.page.mainFrame()) : this.page.mainFrame();
+    const vp = await this.page.evaluate(() => ({ w: innerWidth, h: innerHeight }));
+    let aim;
+    if (target != null) {
+      aim = await this.locate(target).evaluate(SCROLL_BOX_OF);
+      if (aim.x == null) {   // no box of its own: the document, so the element itself is a fine place
+        const b = await this.locate(target).boundingBox();
+        if (b) aim = { ...aim, x: b.x + b.width / 2, y: b.y + b.height / 2 };
+      } else if (frame !== this.page.mainFrame()) {   // frame coordinates -> page coordinates
+        const f = await (await frame.frameElement()).boundingBox();
+        if (f) aim = { ...aim, x: aim.x + f.x, y: aim.y + f.y };
+      }
+    } else aim = await this.page.evaluate(SCROLL_BOX_MAIN);
+    const at = { x: aim.x ?? vp.w / 2, y: aim.y ?? vp.h / 2 };
+    const step = Math.max(100, Math.round((aim.h ?? vp.h) * 0.8));
+    const offset = () => frame.evaluate(SCROLL_OFFSET).catch(() => 0);
+    const start = await offset();
+    await this.page.mouse.move(Math.min(Math.max(at.x, 0), vp.w - 1), Math.min(Math.max(at.y, 0), vp.h - 1));
+    await this.page.mouse.wheel(0, direction === "up" ? -step : step);
+    let last = start;
+    for (const t0 = Date.now(); Date.now() - t0 < 1500;) {
+      await sleep(50);
+      const now = await offset();
+      if (now === last && (now !== start || Date.now() - t0 >= 500)) break;   // landed, or nothing is coming
+      last = now;
+    }
+    return Math.round(last - start);
   }
 
   // Element numbers the caller saw can be stale: the page changed, or check()/choose() renumbered
@@ -535,13 +603,17 @@ export class JevBrowser {
     const el = element == null ? undefined : this.currentElement(element, cur);
     if (TARGETED.has(action) && !el) throw new Error(`${action} needs an element`);
     const dest = destination == null ? undefined : this.currentElement(destination, cur).i;
+    if (action === "scroll" && value != null && !["up", "down"].includes(value)) throw new Error(`scroll value must be "up" or "down", got "${value}"`);
+    const act = { tool: action, target: el?.i, value, key, destination: dest };
+    if (action === "scroll") Object.assign(act, { direction: value ?? "down", scrollTarget: el?.i });
     this.dialogPolicy = acceptDialog ? ACCEPT_DIALOGS : SAFE_DIALOGS;
     let ms;
-    try { ms = await this.act({ tool: action, target: el?.i, value, key, destination: dest }); }
+    try { ms = await this.act(act); }
     finally { this.dialogPolicy = SAFE_DIALOGS; }
     await this.settle();
     const events = this.events.splice(0);
-    return { action, element: brief(el), ms, url: this.page.url(), title: await this.page.title().catch(() => ""), ...(events.length ? { events } : {}) };
+    const scrolled = action === "scroll" ? { scrolled: act.scrolled, ...(act.scrolled ? {} : { info: "nothing moved: already at the end, or nothing scrollable there; pass an element to scroll the box that contains it" }) } : {};
+    return { action, element: brief(el), ms, ...scrolled, url: this.page.url(), title: await this.page.title().catch(() => ""), ...(events.length ? { events } : {}) };
   }
 
   // Work toward one goal.
