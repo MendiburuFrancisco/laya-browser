@@ -1,13 +1,23 @@
 {
   "name": "jev-browser",
   "displayName": "Jev Browser",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Browser automation where Claude plans one outcome at a time and a fast decision model (Jev, TypeSafe System One) picks every click and keystroke, so Claude rarely has to read page snapshots.",
-  "author": { "name": "Ying-Kai Liao", "url": "https://github.com/Ying-Kai-Liao" },
+  "author": {
+    "name": "Ying-Kai Liao",
+    "url": "https://github.com/Ying-Kai-Liao"
+  },
   "homepage": "https://github.com/Ying-Kai-Liao/jev-browser#readme",
   "repository": "https://github.com/Ying-Kai-Liao/jev-browser",
   "license": "MIT",
-  "keywords": ["browser", "automation", "playwright", "web", "forms", "scraping"],
+  "keywords": [
+    "browser",
+    "automation",
+    "playwright",
+    "web",
+    "forms",
+    "scraping"
+  ],
   "documentationUrl": "https://github.com/Ying-Kai-Liao/jev-browser#readme",
   "supportUrl": "https://github.com/Ying-Kai-Liao/jev-browser/issues",
   "privacyPolicyUrl": "https://github.com/Ying-Kai-Liao/jev-browser/blob/main/PRIVACY.md",
