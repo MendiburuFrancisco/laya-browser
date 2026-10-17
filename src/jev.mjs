@@ -8,33 +8,36 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // Jev is served by TypeSafe directly and by OpenRouter (same System One request and response).
-// The first key found picks the provider; JEV_API_URL and JEV_MODEL override its defaults.
+// TYPESAFE_API_KEY wins over OPENROUTER_API_KEY wherever each was found (environment or .env).
+// JEV_API_URL and JEV_MODEL override the TypeSafe endpoint and model only, so an OpenRouter key
+// is never sent to another host.
 const PROVIDERS = {
-  TYPESAFE_API_KEY: { name: "TypeSafe", url: "https://api.typesafe.ai/v1/systemone", model: "jev-latest" },
+  TYPESAFE_API_KEY: { name: "TypeSafe", url: "https://api.typesafe.ai/v1/systemone", model: "jev-latest", overridable: true },
   OPENROUTER_API_KEY: { name: "OpenRouter", url: "https://openrouter.ai/api/v1/systemone", model: "~typesafe/jev-latest" },
 };
 const KEY_NAMES = Object.keys(PROVIDERS);
 let cached;
 export function credentials() {
   if (cached) return cached;
-  const found = name => {
-    const p = PROVIDERS[name];
-    return { name: p.name, url: process.env.JEV_API_URL || p.url, model: process.env.JEV_MODEL || p.model };
-  };
-  for (const k of KEY_NAMES) if (process.env[k]) return (cached = { key: process.env[k], ...found(k) });
+  // The environment beats .env for the same key; the first file listed beats the next.
+  const keys = {};
+  for (const k of KEY_NAMES) if (process.env[k]) keys[k] = process.env[k];
   // The MCP server skips the working directory's .env: as a plugin that is the user's project,
   // and a key found there was not given to this server.
   const files = process.env.JEV_BROWSER_MCP === "1" ? [resolve(ROOT, ".env")] : [resolve(process.cwd(), ".env"), resolve(ROOT, ".env")];
   for (const p of files) {
     if (!existsSync(p)) continue;
-    const vars = {};
     for (const line of readFileSync(p, "utf8").split("\n")) {
       const m = line.match(/^\s*(?:export\s+)?([A-Z_]+)\s*=\s*"?([^"\s]+)"?/);
-      if (m) vars[m[1]] = m[2];
+      if (m && KEY_NAMES.includes(m[1]) && !keys[m[1]]) keys[m[1]] = m[2];
     }
-    for (const k of KEY_NAMES) if (vars[k]) return (cached = { key: vars[k], ...found(k) });
   }
-  throw new Error("No API key: set TYPESAFE_API_KEY or OPENROUTER_API_KEY (as a Claude Code plugin: /plugin, then configure jev-browser) or put one in .env");
+  const k = KEY_NAMES.find(k => keys[k]);
+  if (!k) throw new Error("No API key: set TYPESAFE_API_KEY or OPENROUTER_API_KEY (as a Claude Code plugin: /plugin, then configure jev-browser) or put one in .env");
+  const p = PROVIDERS[k];
+  const url = (p.overridable && process.env.JEV_API_URL) || p.url;
+  const model = (p.overridable && process.env.JEV_MODEL) || p.model;
+  return (cached = { key: keys[k], name: p.name, url, model });
 }
 export const apiKey = () => credentials().key;
 
