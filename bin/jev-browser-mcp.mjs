@@ -3,7 +3,7 @@
 //
 //   claude mcp add jev-browser -- node /path/to/jev-browser/bin/jev-browser-mcp.mjs
 //
-// Env: TYPESAFE_API_KEY or OPENROUTER_API_KEY, JEV_BROWSER_HEADED=1,
+// Env: TYPESAFE_API_KEY or OPENROUTER_API_KEY, JEV_BROWSER_HEADED=1, JEV_BROWSER=chrome|msedge|/path (your browser),
 //      JEV_BROWSER_PROFILE=/dir (persistent profile, keeps logins), JEV_BROWSER_LOG=1 (rounds to stderr),
 //      JEV_BROWSER_NO_INSTALL=1 (don't download Chromium on first use)
 import { createRequire } from "node:module";

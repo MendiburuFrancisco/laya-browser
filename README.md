@@ -220,8 +220,11 @@ and in a diff. Measured on a Wikipedia article (1,840 elements), a default snaps
 26,919 to 9,926 characters (~6,700 → ~2,500 estimated tokens); `filter` brings it to ~800 and
 `diff` after a scroll to ~50.
 
-Env: `JEV_BROWSER_HEADED=1` shows the browser, `JEV_BROWSER_PROFILE=/dir` keeps a persistent
-profile (logins survive restarts), `JEV_BROWSER_LOG=1` prints per-round decisions to stderr,
+Env: `JEV_BROWSER_HEADED=1` shows the browser, `JEV_BROWSER=chrome` runs your own browser
+instead of Playwright's Chromium (`chrome`, `chrome-beta`, `msedge`, or the path to any
+Chromium-based browser's executable, such as Brave), `JEV_BROWSER_PROFILE=/dir` keeps a persistent
+profile (logins survive restarts; use a dedicated directory, since Chrome won't be automated with
+your everyday profile), `JEV_BROWSER_LOG=1` prints per-round decisions to stderr,
 and `JEV_BROWSER_NO_INSTALL=1` turns off the Chromium download on first use. The MCP server
 reads `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` from its environment, or from the `.env` of a source checkout, but
 never from the `.env` of the directory it was started in.
