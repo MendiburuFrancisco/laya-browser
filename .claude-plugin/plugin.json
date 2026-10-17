@@ -32,6 +32,12 @@
       "description": "Run Chromium visibly and outline each element before Jev acts on it. Needed for logging in by hand and for sites that block headless browsers.",
       "default": false
     },
+    "browser": {
+      "type": "string",
+      "title": "Browser",
+      "description": "Run your own browser instead of Playwright's Chromium: chrome, chrome-beta, msedge, or the full path to a Chromium-based browser's executable (Brave, Arc, Vivaldi). Leave empty for Playwright's Chromium.",
+      "default": ""
+    },
     "browser_profile": {
       "type": "string",
       "title": "Browser profile directory",

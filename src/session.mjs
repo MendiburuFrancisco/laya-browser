@@ -110,21 +110,34 @@ export function repeatsBlock(seq, k, times) {
   return true;
 }
 
+// JEV_BROWSER: a Playwright channel for an installed browser (chrome, chrome-beta, msedge, ...)
+// or the path to any Chromium-based browser's executable (Brave, Arc, Vivaldi, ...).
+// Empty or "chromium" keeps Playwright's own Chromium.
+export function browserOptions(use) {
+  use = use?.trim();
+  if (!use || use === "chromium") return {};
+  return /[\\/]/.test(use) ? { executablePath: use } : { channel: use };
+}
+
 export class JevBrowser {
   // userDataDir -> persistent profile (logins survive restarts); browser -> share one Chromium.
   // highlight -> outline each target with Jev's decision before acting (for watching a headed run).
-  static async launch({ headed = false, slowMo = 0, viewport = { width: 1280, height: 800 }, storageState, browser, userDataDir, highlight = false } = {}) {
+  // use -> the browser to run instead of Playwright's Chromium (default JEV_BROWSER): see browserOptions.
+  static async launch({ headed = false, slowMo = 0, viewport = { width: 1280, height: 800 }, storageState, browser, userDataDir, highlight = false, use = process.env.JEV_BROWSER } = {}) {
     let context, own = false;
+    const custom = browserOptions(use), opts = { headless: !headed, slowMo, ...custom };
     try {
     if (userDataDir) {
-      context = await chromium.launchPersistentContext(userDataDir, { headless: !headed, slowMo, viewport });
+      context = await chromium.launchPersistentContext(userDataDir, { ...opts, viewport });
     } else {
       own = !browser;
-      browser ??= await chromium.launch({ headless: !headed, slowMo });
+      browser ??= await chromium.launch(opts);
       context = await browser.newContext({ viewport, storageState });
     }
     } catch (e) {
-      if (/Executable doesn't exist|browserType\.launch/i.test(String(e.message)) && /install/i.test(String(e.message))) throw new Error("Chromium for Playwright is not installed. Run: npx playwright install chromium");
+      const msg = String(e.message);
+      if (Object.keys(custom).length && /is not found|ENOENT|Executable doesn't exist/i.test(msg)) throw new Error(`Browser "${use}" (JEV_BROWSER) was not found. Install it, or set JEV_BROWSER to a Chromium-based browser's executable path, or unset it to use Playwright's Chromium.`);
+      if (/Executable doesn't exist|browserType\.launch/i.test(msg) && /install/i.test(msg)) throw new Error("Chromium for Playwright is not installed. Run: npx playwright install chromium");
       throw e;
     }
     const b = new JevBrowser(browser, context, own);
