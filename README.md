@@ -94,7 +94,8 @@ env `TYPESAFE_API_KEY`. Add `JEV_BROWSER_HEADED=1` to watch it work.
 
 No TypeSafe account? Jev is also on [OpenRouter](https://openrouter.ai/typesafe/jev-1.13): pass
 `-e OPENROUTER_API_KEY=your-key` instead, and calls are billed to your OpenRouter account. When both
-keys are set, `TYPESAFE_API_KEY` wins. `JEV_API_URL` and `JEV_MODEL` override the endpoint and model.
+keys are set, `TYPESAFE_API_KEY` wins, whether each comes from the environment or `.env`. `JEV_API_URL` and
+`JEV_MODEL` override the TypeSafe endpoint and model; they are ignored when the OpenRouter key is used.
 
 ## Setup (from source)
 
