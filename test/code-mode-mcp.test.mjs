@@ -28,7 +28,7 @@ for (const backend of ["jev", "laya"]) {
           const keys = Object.keys(q.criteria);
           const choice = name === "tool" ? (done || blocked ? "none" : "type") : name === "target" ? String(field?.i ?? keys[0]) : keys[0];
           answers[name] = { choice, confidence: 1, probabilities: Object.fromEntries(keys.map(k => [k, k === choice ? 1 : 0])) };
-        } else answers[name] = { noul: name === "blocked" ? +blocked : name === "done" || name === "done_change" ? +(done && !blocked) : name === "q" ? 0.99 : 0 };
+        } else answers[name] = { noul: name === "blocked" ? +blocked : ["done", "done_change", "complete"].includes(name) ? +(done && !blocked) : name === "q" ? 0.99 : 0 };
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ answers, usage: { input_tokens: 10 } }));
@@ -45,7 +45,8 @@ for (const backend of ["jev", "laya"]) {
       return JSON.parse(r.content[0].text);
     };
     try {
-      assert.ok((await client.listTools()).tools.some(t => t.name === "browser_execute"));
+      const tools = (await client.listTools()).tools.map(t => t.name);
+      for (const name of ["browser_execute", "browser_run", "browser_downloads", "browser_webmcp_tools", "browser_webmcp_call"]) assert.ok(tools.includes(name), name);
       const docs = await client.readResource({ uri: "browser://code-mode/api" });
       assert.match(docs.contents[0].text, /BrowserCodeAPI/);
       const result = await call("browser_execute", { values: { url: fixtureUrl, names: ["Ada", "Grace"] }, code: `
@@ -93,6 +94,16 @@ for (const backend of ["jev", "laya"]) {
       assert.equal(timeout.status, "timeout");
       assert.ok(timeout.ms < 5000, "pending download wait is cancelled, not left running for five minutes");
       assert.match((await call("browser_open", { url: fixtureUrl })).visible_text, /Ready/);
+
+      const webmcpUrl = "data:text/html," + encodeURIComponent(`<title>WebMCP integration</title><script>
+        document.modelContext.registerTool({ name: "echo", description: "Echo input", inputSchema: { type: "object", properties: { text: { type: "string" } } }, annotations: { readOnlyHint: true }, execute: ({ text }) => ({ content: [{ type: "text", text }] }) });
+      </script>`);
+      const opened = await call("browser_open", { url: webmcpUrl });
+      assert.deepEqual(opened.webmcp_tools, ["echo"]);
+      assert.deepEqual((await call("browser_webmcp_tools")).tools.map(t => t.name), ["echo"]);
+      const before = requests.length;
+      assert.equal((await call("browser_webmcp_call", { name: "echo", arguments: { text: "fork preserved" } })).result, "fork preserved");
+      assert.equal(requests.length, before, "direct WebMCP calls need no inference");
     } finally {
       await call("browser_close").catch(() => {});
       await client.close();

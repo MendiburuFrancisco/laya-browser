@@ -13,3 +13,6 @@ __pycache__/
 .jev-cache.json
 .opencode/
 examples/appointment-demo.mjs
+.playwright-mcp/
+.DS_Store
+evals/results/

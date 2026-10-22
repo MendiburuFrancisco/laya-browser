@@ -1,6 +1,6 @@
 {
   "name": "laya-browser",
-  "version": "0.1.2",
+  "version": "0.2.1",
   "description": "Browser automation with Laya local and Jev (Typesafe System One) decision backends. Library, CLI and MCP server.",
   "keywords": [
     "mcp",
@@ -12,7 +12,8 @@
     "jev",
     "laya",
     "typesafe",
-    "claude"
+    "claude",
+    "claude-code-plugin"
   ],
   "license": "MIT",
   "author": "Ying-Kai Liao",
@@ -57,7 +58,9 @@
     "examples:laya": "node bench/compare-backends.mjs --backend laya --headed --repetitions 1 --pause-ms 3000 --out bench/results/laya-examples",
     "mcp": "node bin/laya-browser-mcp.mjs",
     "cost": "node bin/jev-cost.mjs",
-    "setup": "npx playwright install chromium"
+    "setup": "npx playwright install chromium",
+    "version": "node scripts/sync-plugin-version.mjs && git add .claude-plugin/plugin.json .mcp.json",
+    "validate": "node scripts/sync-plugin-version.mjs --check && claude plugin validate . --strict"
   },
   "engines": {
     "node": ">=20"
