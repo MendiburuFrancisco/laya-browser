@@ -65,6 +65,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "playwright": "^1.63.0",
+    "quickjs-emscripten": "^0.32.0",
     "zod": "^4.6.5"
   }
 }

@@ -27,6 +27,8 @@ test("MCP viewport supports explicit sizes, null, environment defaults, and vali
   try {
     const tools = (await client.listTools()).tools;
     assert.ok(tools.find(t => t.name === "browser_open").inputSchema.properties.viewport);
+    assert.ok(tools.some(t => t.name === "browser_downloads"));
+    assert.ok(tools.some(t => t.name === "browser_wait_for_download"));
     const fixed = { width: 1280, height: 800 };
     assert.deepEqual((await open({ viewport: fixed })).viewport, fixed);
     assert.deepEqual(await screenshotSize(), fixed);

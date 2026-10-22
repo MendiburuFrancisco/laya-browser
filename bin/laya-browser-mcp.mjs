@@ -13,13 +13,16 @@ import { JevBrowser } from "../src/session.mjs";
 import { BACKEND, API_URL, MODEL } from "../src/jev.mjs";
 import { runPlan } from "../src/plan.mjs";
 import { formatRead } from "../src/prune.mjs";
+import { defaultDownloadsDir } from "../src/downloads.mjs";
+import { BrowserLease, executeCode, executeShape } from "../src/code-mode.mjs";
+import { CODE_API_TYPES, doStep, invokeBrowser, goalShape, planShape, checkShape, chooseShape, readShape, snapshotShape, verifySchema } from "../src/browser-api.mjs";
 
 const backendInfo = { backend: BACKEND, decision_endpoint: API_URL, decision_model: MODEL };
 
 // Holds the launch promise, not the session, so parallel tool calls share one browser.
 let session;
 let sessionViewport;
-let planRunning = false;
+const lease = new BrowserLease();
 const viewportSchema = z.object({ width: z.number().int().positive(), height: z.number().int().positive() }).nullable();
 function defaultViewport() {
   const value = process.env.JEV_BROWSER_VIEWPORT;
@@ -33,21 +36,20 @@ function browser(viewport) {
   }
   if (!session) {
     sessionViewport = viewport === undefined ? defaultViewport() : viewport;
-    session = JevBrowser.launch({ viewport: sessionViewport, headed: process.env.JEV_BROWSER_HEADED === "1", highlight: process.env.JEV_BROWSER_HEADED === "1", userDataDir: process.env.JEV_BROWSER_PROFILE || undefined })
+    session = JevBrowser.launch({ viewport: sessionViewport, headed: process.env.JEV_BROWSER_HEADED === "1", highlight: process.env.JEV_BROWSER_HEADED === "1", userDataDir: process.env.JEV_BROWSER_PROFILE || undefined, downloadsDir: process.env.JEV_BROWSER_DOWNLOADS_DIR || defaultDownloadsDir() })
       .catch(e => { session = undefined; sessionViewport = undefined; throw e; });
   }
   return session;
 }
 async function closeSession() {
-  if (!session) return;
+  if (!session) return { pending_downloads: [] };
   const s = session; session = undefined; sessionViewport = undefined;
-  await (await s.catch(() => null))?.close();
+  return await (await s.catch(() => null))?.close() ?? { pending_downloads: [] };
 }
 const text = obj => ({ content: [{ type: "text", text: typeof obj === "string" ? obj : JSON.stringify(obj, null, 1) }] });
 const fail = e => ({ isError: true, content: [{ type: "text", text: String(e?.message ?? e).split("\n")[0] }] });
-const wrap = fn => async args => { try {
-  if (planRunning) throw new Error("A browser_run plan is executing. Wait for it to finish before calling another browser tool.");
-  return await fn(args);
+const wrap = fn => async (args, extra) => { try {
+  return await lease.run(() => fn(args, extra));
 } catch (e) { return fail(e); } };
 const stderrLog = process.env.JEV_BROWSER_LOG === "1" ? s => process.stderr.write(s + "\n") : () => {};
 
@@ -64,7 +66,7 @@ server.registerTool("browser_open", {
   const b = await browser(viewport);
   const r = await b.open(url);
   const page = await b.snapshot();
-  return text({ ...r, ...backendInfo, viewport: b.page.viewportSize(), cache_enabled: !!b.cache, elements: page.elements.length, visible_text: page.text.slice(0, 400) });
+  return text({ ...r, ...backendInfo, viewport: b.page.viewportSize(), downloads_dir: b.downloads.directory, cache_enabled: !!b.cache, elements: page.elements.length, visible_text: page.text.slice(0, 400) });
 }));
 
 server.registerTool("browser_do", {
@@ -78,17 +80,16 @@ server.registerTool("browser_do", {
     "After steps with side effects, use browser_check to confirm nothing unintended changed.",
   ].join("\n"),
   inputSchema: {
-    goal: z.string().describe("One observable outcome"),
-    values: z.record(z.string(), z.string()).optional().describe("Named strings Jev may type/select/upload"),
-    max_actions: z.number().int().min(1).max(30).optional().describe("Default 10"),
+    ...goalShape,
+    verify: verifySchema.optional().describe("Optional deterministic postconditions"),
     allow_irreversible: z.boolean().optional().describe("Proceed through actions like placing orders, paying, sending, deleting"),
     explain: z.boolean().optional().describe("Include per-round Jev probabilities"),
   },
-}, wrap(async ({ goal, values, max_actions, allow_irreversible, explain }) => {
+}, wrap(async ({ goal, values, max_actions, allow_irreversible, explain, verify }) => {
   const b = await browser();
-  const r = await b.do(goal, { values: values ?? {}, maxActions: max_actions ?? 10, allowIrreversible: !!allow_irreversible, log: stderrLog });
+  const r = await doStep(b, { goal, values, max_actions, allow_irreversible, verify }, { log: stderrLog });
   const actions = r.actions.map(h => h.event ? `(event) ${h.event}` : `${h.action}${h.key ? ` ${h.key}` : ""} ${h.element ?? ""}${h.value ? ` <- values.${h.value}` : ""}${h.option ? ` <- "${h.option}"` : ""}${h.destination ? ` -> ${h.destination}` : ""}${h.error ? `  ERROR: ${h.error}` : ""}`.trim());
-  const out = { status: r.status, ...backendInfo, url: r.url, title: r.title, actions, done_score: r.done_score, decision_calls: r.jev_calls, jev_calls: r.jev_calls, ms: r.ms };
+  const out = { status: r.status, ...backendInfo, url: r.url, title: r.title, actions, downloads: b.downloads.list(), done_score: r.done_score, decision_calls: r.jev_calls, jev_calls: r.jev_calls, ms: r.ms };
   if (r.cache) out.cache = r.cache;
   for (const k of ["info", "pending", "page_text", "candidates"]) if (r[k]) out[k] = r[k];
   if (explain) out.rounds = r.rounds.map(({ candidates, ...x }) => x);
@@ -99,46 +100,73 @@ server.registerTool("browser_run", {
   title: "Run an ordered browser plan",
   description: "Execute the user's ordered route serially inside the MCP server, with no LLM round trip between successful steps. Obtain the plan and values first. Each step has one observable goal. Returns after all steps finish or on the first non-done status, failed verification, or exception. likely_done also stops. Optional verify checks are deterministic page postconditions. Keeps the browser open. Resume with the failed step and remaining tail, not the completed prefix. Do not call other browser tools while a plan executes.",
   inputSchema: {
-    url: z.string().optional().describe("Starting URL. Omit to continue the current session."),
+    ...planShape,
     viewport: viewportSchema.optional().describe("Launch viewport; null follows the window. Close existing session before changing it."),
-    steps: z.array(z.object({
-      goal: z.string().min(1),
-      values: z.record(z.string(), z.string()).optional(),
-      max_actions: z.number().int().min(1).max(30).optional(),
-      allow_irreversible: z.boolean().optional().describe("Only for the specific action authorised by the user"),
-      verify: z.object({
-        url_includes: z.string().min(1).optional(),
-        text_includes: z.string().min(1).optional(),
-        field: z.object({ label: z.string().min(1), value_key: z.string().min(1) }).optional()
-          .describe("Verify a field by exact label/placeholder against a key in this step's values"),
-      }).optional(),
-    })).min(1).max(30).describe("Ordered steps executed locally without intermediate LLM responses"),
   },
 }, wrap(async ({ steps, url, viewport }) => {
-  planRunning = true;
+  const b = await browser(viewport);
+  return text({ ...backendInfo, ...await runPlan(b, steps, { url, log: stderrLog }) });
+}));
+
+server.registerResource("browser-code-api", "browser://code-mode/api", {
+  description: "TypeScript declarations for browser_execute. Programs are JavaScript async function bodies.",
+  mimeType: "text/plain",
+}, async uri => ({ contents: [{ uri: uri.href, mimeType: "text/plain", text: CODE_API_TYPES }] }));
+
+server.registerTool("browser_execute", {
+  title: "Execute browser Code Mode",
+  description: [
+    "Execute a JavaScript async function body in an isolated QuickJS/WASM sandbox. The caller LLM writes code; Laya or Jev still decides browser actions.",
+    "Use await browser.open({url}), browser.do({goal,values?,max_actions?,verify?}), browser.run({steps,url?}), browser.check({question}), browser.choose({question,options}), browser.read({question,max_chars?}), browser.snapshot({filter?}), browser.downloads({}), browser.waitForDownload({after_id}).",
+    "check returns {p_yes}; read returns {content}; snapshot returns {text}. Full TypeScript declarations: browser://code-mode/api.",
+    "values is JSON input; return only needed JSON data. No imports, console, Node, filesystem, fetch or raw Playwright. Await every call; browser operations are serial even with Promise.all.",
+    "Any non-done status suspends the entire program, including inside try/catch. Inspect suspended and progress; resume only unfinished work. Effects already performed are not rolled back. check/choose probabilities are not deterministic assertions.",
+    "Set authorized_goals outside code only for exact irreversible goals the user authorized. A timeout/cancellation during a browser call closes the session to stop pending actions. Do not call other browser tools during execution.",
+  ].join("\n"),
+  inputSchema: executeShape,
+}, wrap(async (args, extra) => {
+  let b, calls = 0;
   try {
-    const b = await browser(viewport);
-    return text({ ...backendInfo, ...await runPlan(b, steps, { url, log: stderrLog }) });
-  } finally { planRunning = false; }
+    const result = await executeCode(args, {
+      signal: extra?.signal,
+      onAbort: async () => {
+        // Cancel Playwright auto-waits immediately, before graceful download draining.
+        if (session) await (await session.catch(() => null))?.context.close().catch(() => {});
+        await closeSession();
+      },
+      invoke: async (method, input, policy) => {
+        policy.signal.throwIfAborted();
+        if (!b) {
+          b = await browser(); calls = b.stats.calls;
+          b.execution = { signal: policy.signal, remainingCalls: policy.maxDecisionCalls, remainingActions: policy.maxBrowserActions };
+        }
+        b.assertExecution();
+        const result = await invokeBrowser(b, method, input, { ...policy, log: stderrLog });
+        b.assertExecution();
+        return result;
+      },
+    });
+    return text({ ...backendInfo, ...result, decision_calls: b ? b.stats.calls - calls : 0 });
+  } finally { if (b) b.execution = undefined; }
 }));
 
 server.registerTool("browser_check", {
   title: "Check page",
   description: "Ask a yes/no question about the current page. Returns the probability of yes (≥0.85 reliable yes, ≤0.15 reliable no, in between: look yourself with browser_snapshot).",
-  inputSchema: { question: z.string() },
+  inputSchema: checkShape,
 }, wrap(async ({ question }) => {
   const b = await browser();
-  const p = await b.check(question);
+  const { p_yes: p } = await invokeBrowser(b, "check", { question });
   return text({ ...backendInfo, question, p_yes: +p.toFixed(3), decision_calls: 1 });
 }));
 
 server.registerTool("browser_choose", {
   title: "Choose about page",
   description: "Ask which of several options is true of the current page. Options must be provided (Jev cannot generate text). Returns the choice and a probability per option.",
-  inputSchema: { question: z.string(), options: z.array(z.string()).min(2).max(255) },
+  inputSchema: chooseShape,
 }, wrap(async ({ question, options }) => {
   const b = await browser();
-  const r = await b.choose(question, options);
+  const r = await invokeBrowser(b, "choose", { question, options });
   return text({ ...backendInfo, decision_calls: 1, choice: r.choice, confidence: r.confidence, probabilities: Object.fromEntries(Object.entries(r.probabilities).map(([k, v]) => [k, +v.toFixed(3)])) });
 }));
 
@@ -149,13 +177,7 @@ server.registerTool("browser_snapshot", {
     "This is the one observation you read in full, so narrow it: `diff` after an action, `filter` when you know what you are looking for, `interactive` when the page's prose does not matter.",
     "Link targets are omitted unless `urls` is true; element numbers, not URLs, are what browser_act takes.",
   ].join("\n"),
-  inputSchema: {
-    diff: z.boolean().optional().describe("Only what changed since the previous snapshot (falls back to a full one if there is none). Carries no element numbers: take a full snapshot to act."),
-    interactive: z.boolean().optional().describe("Drop the visible-text block and list only elements (dialog/status text is kept)"),
-    filter: z.string().optional().describe("Keep only elements whose label/text/placeholder/name/href contains this substring, case-insensitive"),
-    urls: z.boolean().optional().describe("Print href= on element lines. Default false"),
-    max_chars: z.number().int().min(200).optional().describe("Size limit of the rendered snapshot. Default 10000, capped at 20000"),
-  },
+  inputSchema: snapshotShape,
 }, wrap(async ({ diff, interactive, filter, urls, max_chars }) =>
   text(await (await browser()).snapshotText({ diff: !!diff, interactive: !!interactive, filter: filter ?? "", urls: !!urls, maxChars: max_chars }))));
 
@@ -170,7 +192,34 @@ server.registerTool("browser_act", {
     destination: z.number().int().optional().describe("Drop target element number for drag"),
     accept_dialog: z.boolean().optional().describe("Accept a confirm/prompt dialog this action opens (e.g. \"Delete this item?\"). Default: dismiss"),
   },
-}, wrap(async ({ accept_dialog, ...args }) => text(await (await browser()).actOn({ ...args, acceptDialog: !!accept_dialog }))));
+}, wrap(async ({ accept_dialog, ...args }) => {
+  const b = await browser();
+  const result = await b.actOn({ ...args, acceptDialog: !!accept_dialog });
+  return text({ ...result, downloads: b.downloads.list() });
+}));
+
+server.registerTool("browser_downloads", {
+  title: "List downloads",
+  description: "List files downloaded during this browser session, including completion status and persistent local paths. Optionally return only downloads started after after_id.",
+  inputSchema: { after_id: z.string().optional().describe("Return only downloads started after this download ID") },
+}, wrap(async ({ after_id }) => {
+  const b = await browser();
+  return text({ downloads_dir: b.downloads.directory, downloads: b.downloads.list({ afterId: after_id }) });
+}));
+
+server.registerTool("browser_wait_for_download", {
+  title: "Wait for download",
+  description: "Wait for a specific download ID, or for a download newer than after_id. Returns the completed file path or timeout state.",
+  inputSchema: {
+    id: z.string().optional().describe("Specific download ID to wait for"),
+    after_id: z.string().optional().describe("Wait for a download started after this ID; use an empty string for the next download"),
+    timeout_ms: z.number().int().min(100).max(300000).optional().describe("Maximum wait in milliseconds; defaults to 30000"),
+  },
+}, wrap(async ({ id, after_id, timeout_ms }) => {
+  if (!id && after_id === undefined) throw new Error("Provide id or after_id to identify the download; use an empty after_id to wait for the next download.");
+  const b = await browser();
+  return text(await b.downloads.wait({ id, afterId: after_id, timeoutMs: timeout_ms ?? 30000 }));
+}));
 
 server.registerTool("browser_screenshot", {
   title: "Screenshot",
@@ -186,8 +235,8 @@ server.registerTool("browser_close", {
   description: "Close the browser session. The next call starts a fresh one.",
   inputSchema: {},
 }, wrap(async () => {
-  await closeSession();
-  return text({ closed: true });
+  const result = await closeSession();
+  return text({ closed: true, ...result });
 }));
 
 server.registerTool("browser_read", {
@@ -199,13 +248,10 @@ server.registerTool("browser_read", {
     "Short pages come back whole with no model call. Long ones are pruned: whatever is left out is counted and marked in place with [… N blocks dropped …], never silently cut. Widen `question` or raise `max_chars` to get more back, or use browser_snapshot for the page as it normally appears.",
     "Costs ~1 s per 50k characters of page text.",
   ].join("\n"),
-  inputSchema: {
-    question: z.string().describe("What you want to learn from the page; blocks are kept or dropped against this"),
-    max_chars: z.number().int().min(500).max(200_000).optional().describe("Character budget for the content returned. Default 12000"),
-  },
+  inputSchema: readShape,
 }, wrap(async ({ question, max_chars }) => {
   const b = await browser();
-  const r = await b.read(question, max_chars ? { budgetChars: max_chars } : {});
+  const r = await invokeBrowser(b, "read", { question, max_chars });
   return text(formatRead(r));
 }));
 

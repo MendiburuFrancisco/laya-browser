@@ -39,9 +39,10 @@ export function apiKey() {
 }
 
 // questions: { name: { type: "noul" | "choice" | "score", instructions, criteria? } }
-export async function jev(state, questions, { retries = 2, timeout = 60_000 } = {}) {
+export async function jev(state, questions, { retries = 2, timeout = 60_000, signal } = {}) {
   const key = BACKEND === "laya" ? null : apiKey();
   for (let attempt = 0; ; attempt++) {
+    signal?.throwIfAborted();
     const t = performance.now();
     let res, body;
     try {
@@ -49,10 +50,11 @@ export async function jev(state, questions, { retries = 2, timeout = 60_000 } = 
         method: "POST",
         headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), "Content-Type": "application/json" },
         body: JSON.stringify({ state, model: MODEL, questions }),
-        signal: AbortSignal.timeout(timeout),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout),
       });
       body = await res.json().catch(() => ({}));
     } catch (e) {
+      signal?.throwIfAborted();
       if (attempt < retries) { await sleep(800 * (attempt + 1)); continue; }
       throw e;
     }

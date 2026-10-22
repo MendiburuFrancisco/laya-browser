@@ -10,6 +10,7 @@
 // element). Follow-up requests are made only when needed: a key to press, a drag destination,
 // an option to select, or a stricter "is it done" when the answers disagree.
 import { chromium } from "playwright";
+import { DownloadManager, defaultDownloadsDir } from "./downloads.mjs";
 import { jev } from "./jev.mjs";
 import { ENUMERATE, TRACK_INTERACTIONS, EXTRACT_BLOCKS } from "./page-script.mjs";
 import { LocatorCache, cacheKey } from "./locator-cache.mjs";
@@ -66,15 +67,17 @@ export function repeatsBlock(seq, k, times) {
 export class JevBrowser {
   // userDataDir -> persistent profile (logins survive restarts); browser -> share one Chromium.
   // highlight -> outline each target with Jev's decision before acting (for watching a headed run).
-  static async launch({ headed = false, slowMo = 0, viewport = { width: 1280, height: 800 }, storageState, browser, userDataDir, highlight = false } = {}) {
-    let context, own = false;
+  static async launch({ headed = false, slowMo = 0, viewport = { width: 1280, height: 800 }, storageState, browser, userDataDir, highlight = false, downloadsDir = defaultDownloadsDir() } = {}) {
+    let context, own = false, downloads;
     try {
+    downloads = new DownloadManager(downloadsDir);
+    await downloads.initialize();
     if (userDataDir) {
-      context = await chromium.launchPersistentContext(userDataDir, { headless: !headed, slowMo, viewport });
+      context = await chromium.launchPersistentContext(userDataDir, { headless: !headed, slowMo, viewport, acceptDownloads: true });
     } else {
       own = !browser;
       browser ??= await chromium.launch({ headless: !headed, slowMo });
-      context = await browser.newContext({ viewport, storageState });
+      context = await browser.newContext({ viewport, storageState, acceptDownloads: true });
     }
     } catch (e) {
       if (/Executable doesn't exist|browserType\.launch/i.test(String(e.message)) && /install/i.test(String(e.message))) throw new Error("Chromium for Playwright is not installed. Run: npx playwright install chromium");
@@ -82,8 +85,10 @@ export class JevBrowser {
     }
     await context.addInitScript(TRACK_INTERACTIONS);
     const b = new JevBrowser(browser, context, own);
+    b.downloads = downloads;
     b.highlight = highlight;
     b.page = context.pages()[0] ?? await context.newPage();
+    for (const p of context.pages()) downloads.attach(p);
     await b.page.evaluate(TRACK_INTERACTIONS);
     return b;
   }
@@ -107,6 +112,7 @@ export class JevBrowser {
     const untrack = r => this.inflight.delete(r);
     context.on("request", track); context.on("requestfinished", untrack); context.on("requestfailed", untrack);
     context.on("page", p => { if (this._page && p !== this._page) { this.events.push(`new tab opened: ${p.url()}`); this.page = p; } });
+    context.on("page", p => this.downloads?.attach(p));
   }
 
   get page() { return this._page; }
@@ -126,6 +132,7 @@ export class JevBrowser {
   async settle({ quiet = 400, max = 8000 } = {}) {
     const t0 = Date.now();
     while (Date.now() - t0 < max) {
+      this.assertExecution();
       const now = Date.now();
       const net = [...this.inflight.values()].filter(t => now - t < 5000).length;
       let idle = 0;
@@ -137,6 +144,7 @@ export class JevBrowser {
   }
 
   async open(url) {
+    this.assertExecution();
     const t0 = Date.now();
     await this.page.goto(url, { waitUntil: "commit", timeout: 30_000 });
     await this.page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
@@ -191,9 +199,19 @@ export class JevBrowser {
   }
 
   async call(state, questions) {
-    const r = await jev(state, questions);
+    this.assertExecution();
+    if (this.execution && this.execution.remainingCalls-- <= 0) {
+      this.execution.error = Object.assign(new Error("Decision call budget exhausted"), { status: "limit_exceeded" });
+      throw this.execution.error;
+    }
+    const r = await jev(state, questions, { signal: this.execution?.signal });
     this.stats.calls++; this.stats.jev_ms += r.ms; this.stats.tokens += r.tokens;
     return r;
+  }
+
+  assertExecution() {
+    this.execution?.signal?.throwIfAborted();
+    if (this.execution?.error) throw this.execution.error;
   }
 
   // Yes/no question about the current page -> probability.
@@ -349,6 +367,11 @@ export class JevBrowser {
 
   // act = { tool, target?, value?, key?, destination? }
   async act(act) {
+    this.assertExecution();
+    if (this.execution && this.execution.remainingActions-- <= 0) {
+      this.execution.error = Object.assign(new Error("Browser action budget exhausted"), { status: "limit_exceeded" });
+      throw this.execution.error;
+    }
     const t = Date.now();
     const needs = TARGETED.has(act.tool) || (act.tool === "press_key" && act.target != null);
     const loc = needs ? this.locate(act.target) : null;
@@ -361,9 +384,11 @@ export class JevBrowser {
         if (act.value == null) throw new Error("no value to type");
         const v = String(act.value);
         await loc.fill("", o);
+        this.assertExecution();
         // real key events: some widgets (date pickers, masks) undo programmatic fill()
         if (v.length <= 120) await loc.pressSequentially(v, { delay: 5, ...o }); else await loc.fill(v, o);
         const got = await loc.inputValue({ timeout: 1000 }).catch(() => null);
+        this.assertExecution();
         if (got !== null && got !== v) await loc.fill(v, o);
         break;
       }
@@ -465,6 +490,7 @@ export class JevBrowser {
     const seen = new Map();
     this.promptText = values.prompt;
     for (let round = 0; round <= maxActions; round++) {
+      this.assertExecution();
       await this.settle();
       page = await this.snapshot();
       if (this.events.length) history.push(...this.events.splice(0).map(e => ({ event: e })));
@@ -642,5 +668,10 @@ export class JevBrowser {
   }
 
   async screenshot({ path, fullPage = false } = {}) { return this.page.screenshot({ path, fullPage }); }
-  async close() { await this.context.close().catch(() => {}); if (this.ownBrowser) await this.browser.close().catch(() => {}); }
+  async close() {
+    const pending = await this.downloads?.drain();
+    await this.context.close().catch(() => {});
+    if (this.ownBrowser) await this.browser.close().catch(() => {});
+    return { pending_downloads: pending ?? [] };
+  }
 }

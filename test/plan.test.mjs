@@ -39,3 +39,15 @@ test("plan preserves completed progress on inference exception", async () => {
   assert.equal(result.status, "error"); assert.equal(result.failed_step, 2);
   assert.equal(result.completed, 1); assert.match(result.info, /unavailable/);
 });
+
+test("plan waits for a new matching download during step verification", async () => {
+  const { b } = fake(["done"]);
+  b.downloads = { items: [], wait: async ({ afterId }) => {
+    assert.equal(afterId, "");
+    b.downloads.items.push({ id: "download-1", filename: "errors.csv", status: "completed" });
+    return { status: "completed", downloads: [...b.downloads.items] };
+  } };
+  const result = await runPlan(b, [{ goal: "download report", verify: { download: { filename: "errors.csv", timeout_ms: 1000 } } }]);
+  assert.equal(result.status, "done");
+  assert.equal(result.completed, 1);
+});

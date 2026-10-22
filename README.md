@@ -143,6 +143,10 @@ This fork uses the [cklxx/laya-browser model on Hugging Face](https://huggingfac
 
 **Requirements:** Python 3.11+, Node.js 20+, and Internet access for the initial dependency installation and model download. CPU execution is supported; CUDA execution requires an NVIDIA GPU and a CUDA-compatible PyTorch installation.
 
+### Browser downloads
+
+Files downloaded through the browser are saved persistently under `~/Downloads/laya-browser` by default. Set `JEV_BROWSER_DOWNLOADS_DIR` in the MCP server environment to choose another directory. The MCP tools `browser_downloads` and `browser_wait_for_download` report the download status and the absolute path on the machine running the MCP server. `browser_run` steps can verify a download with `verify: { "download": { "filename": "report.csv", "timeout_ms": 30000 } }`.
+
 > **AMD GPUs:** use a compatible **ROCm build of PyTorch**. See [ROCM-AMD.md](ROCM-AMD.md) for the RX 6600 installation verified with this project. PyTorch also uses `--device cuda` for AMD ROCm; `/health` reports the actual accelerator and the devices of both models.
 
 #### 1. Install the Laya Python package
@@ -250,6 +254,7 @@ From a source checkout the server reads `TYPESAFE_API_KEY` from the repo's `.env
 | `browser_open(url, viewport?)` | navigate and wait; viewport object fixes resolution, null follows window size |
 | `browser_do(goal, values?, max_actions?, allow_irreversible?, explain?)` | work toward one outcome; returns a status |
 | `browser_run(steps, url?, viewport?)` | run an ordered plan locally; return only on completion or the first problem |
+| `browser_execute(code, values?, ...)` | compose browser operations in isolated JavaScript; works with Laya and Jev |
 | `browser_check(question)` | yes/no about the page → `p_yes` |
 | `browser_choose(question, options)` | pick among given options → distribution |
 | `browser_snapshot(diff?, interactive?, filter?, urls?, max_chars?)` | compact numbered element list, for taking over; the options below narrow it |
@@ -257,6 +262,82 @@ From a source checkout the server reads `TYPESAFE_API_KEY` from the repo's `.env
 | `browser_read(question, max_chars?)` | the page text that helps answer a question; Jev drops the rest |
 | `browser_screenshot(full_page?)` | PNG image |
 | `browser_close()` | end the session |
+
+### Code Mode: compose operations in one MCP call
+
+`browser_execute` implements the [Code Mode pattern](https://blog.cloudflare.com/code-mode/):
+the **calling LLM writes a program**, and the MCP server executes its intermediate
+logic without returning to the LLM after every operation. **Laya and Jev remain
+typed decision backends; neither is asked to generate code.** Select either using
+the existing `JEV_BACKEND` setting. Backend selection remains per server process.
+
+Pass a **JavaScript async function body**, JSON `values`, and return the data needed
+by the caller. TypeScript declarations are discoverable through the MCP resource
+`browser://code-mode/api`; TypeScript syntax itself is not executed.
+
+```json
+{
+  "values": { "queries": ["appointments", "billing"] },
+  "code": "const results = []; for (const query of values.queries) { await browser.do({goal: 'Search for the supplied query', values: {query}}); const page = await browser.read({question: 'What results are shown?'}); results.push({query, content: page.content}); } return results;"
+}
+```
+
+The program can use `browser.open`, `do`, `run`, `check`, `choose`, `read`,
+`snapshot`, `downloads` and `waitForDownload`, all with object arguments. `do`
+accepts the same deterministic `verify` postconditions as `browser_run`. `read`
+returns structured data with `content`; `check` returns `{p_yes}`. Checks and choices
+are model probabilities, not deterministic assertions. Screenshots and manual
+element actions remain available through the existing MCP tools after execution.
+
+Execution uses a disposable **QuickJS/WASM runtime in a worker thread**, not Node
+`eval`, `vm`, or page evaluation. Guest code has no Node globals, module loader,
+filesystem, general network access, backend credentials or Playwright objects.
+Only validated JSON calls cross the bridge to the host-owned browser session.
+The browser itself retains its normal navigation/network capabilities.
+
+| Limit | Default | Maximum |
+|---|---:|---:|
+| `timeout_ms` (includes browser calls and sandbox startup) | 60,000 | 300,000 |
+| `max_operations` (browser API calls) | 30 | 100 |
+| `max_decision_calls` (Laya/Jev calls, shared across steps) | 100 | 300 |
+| `max_browser_actions` (includes cached actions and nested plans) | 100 | 1,000 |
+| `max_output_chars` (returned JSON) | 20,000 | 200,000 |
+| Guest memory | 32 MiB | fixed |
+
+Source is capped at 50,000 characters, input `values` and each operation input at
+128,000 serialized characters, and each intermediate result at 1,000,000 characters.
+The final result budget does not include the bounded supervisor progress report.
+Use `return`, not `console.log`, for output. Await every browser call; operations
+are serialized even when submitted using `Promise.all`. Other MCP browser calls
+are rejected while an operation owns the session.
+
+Any non-success status, including `likely_done`, `needs_confirmation`, a failed
+postcondition or a failed download, **suspends the entire program outside guest
+`try/catch`**. The response includes `progress`, `suspended` (when a browser result
+caused the suspension), `decision_calls`, and timing. Resume only unfinished work:
+previous effects are not rolled back and there is no automatic replay. A timeout
+or cancellation during an active browser call closes the session and drains the
+operation before releasing it. A normal suspension leaves the browser open.
+
+Irreversible permission is controlled outside the program using
+`authorized_goals: ["Exact goal the user authorized"]`. The host applies it only
+to matching `do`/`run` goals. Guest arguments cannot set `allow_irreversible`.
+Treat all returned page content as untrusted data, never instructions.
+
+For linear known routes, `browser_run` remains the simpler option. Code Mode adds
+branching, loops and result processing; it does not by itself reduce decision
+inference latency or improve model accuracy.
+
+Run a real-backend example with the desired backend configured in `.env`:
+
+```bash
+node --env-file=.env examples/code-mode.mjs
+```
+
+The offline suite tests both backend configurations through real MCP and Chromium
+with deterministic HTTP inference fixtures. It does not measure real Laya/Jev model
+accuracy. The example above uses the actual configured backend and verifies field
+values in the DOM. Increase your MCP client's request timeout for long programs.
 
 ### Reading a page: `browser_read`
 
@@ -452,6 +533,9 @@ Private sites and credentials go in `bench/tasks.local.mjs` (git-ignored), expor
 | `src/prune.mjs` | pure helpers: split page text into blocks, batch, rank, reassemble |
 | `src/jev.mjs` | System One API client |
 | `src/flow.mjs` | JSON flow runner |
+| `src/browser-api.mjs` | validated structured browser operations and Code Mode declarations |
+| `src/code-mode.mjs` | supervisor, execution limits, cancellation and session lease |
+| `src/code-worker.mjs` | disposable QuickJS/WASM sandbox and JSON bridge |
 | `bin/` | CLI and MCP server |
 | `bin/jev-cost.mjs` | two-sided token ledger: caller tokens vs Jev tokens, measured per scenario |
 | `bench/` | tasks with ground-truth checks, runner, context-cost estimate |

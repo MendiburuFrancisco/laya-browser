@@ -256,6 +256,83 @@ Las operaciones propuestas por el modelo de navegador son click, escritura,
 select, Enter, scroll, espera y estados de finalización/bloqueo. Otras acciones,
 como hover, arrastrar o subir archivos, siguen disponibles mediante `browser_act`.
 
+### Code Mode: condiciones y bucles en una llamada
+
+`browser_execute` permite que el LLM cliente escriba un programa JavaScript y
+ejecute varios pasos sin volver al LLM entre operaciones. Funciona con
+`JEV_BACKEND=laya` y `JEV_BACKEND=jev`: ambos siguen tomando decisiones de
+navegación, sin generar código. Reinicia el proceso MCP para descubrir la nueva
+herramienta después de actualizar.
+
+Ejemplo de argumentos sobre una página con un campo `Name`:
+
+```json
+{
+  "values": { "names": ["Ada", "Grace"] },
+  "code": "const completed = []; for (const name of values.names) { await browser.do({goal: 'Enter the supplied name into Name', values: {name}, verify: {field: {label: 'Name', value_key: 'name'}}}); completed.push(name); } return completed;",
+  "timeout_ms": 120000
+}
+```
+
+El código es el cuerpo de una función `async`: puede usar `await`, condiciones,
+bucles y `return` con datos JSON. La interfaz tipada está en el recurso MCP
+`browser://code-mode/api`; los programas usan JavaScript, no sintaxis TypeScript.
+Métodos: `browser.open`, `do`, `run`, `check`, `choose`, `read`, `snapshot`,
+`downloads` y `waitForDownload`. Todos reciben objetos. `read` devuelve `content`,
+`check` devuelve `p_yes` y `snapshot` devuelve `text`.
+
+Se ejecuta en QuickJS/WASM dentro de un worker aislado, sin acceso directo a Node,
+archivos, claves del backend, red general ni objetos Playwright. Las operaciones
+validadas pasan al navegador del servidor. Espera cada llamada con `await`; la
+sesión se usa en serie incluso con `Promise.all`.
+
+Límites predeterminados: 60 segundos, 30 llamadas a la interfaz, 100 llamadas de
+decisión, 100 acciones de navegador, 32 MiB de memoria y 20.000 caracteres de
+salida JSON. Puedes ajustar `timeout_ms`, `max_operations`, `max_decision_calls`,
+`max_browser_actions` y `max_output_chars` dentro de los límites publicados en
+`README.md`.
+
+Un estado como `likely_done`, `needs_confirmation`, `blocked` o
+`verification_failed` suspende todo el programa, incluso si contiene `try/catch`.
+Consulta `progress` y `suspended` para continuar solo el trabajo pendiente. Los
+efectos ya realizados no se revierten. Si vence el tiempo o se cancela durante
+una operación activa, se cierra la sesión para detener acciones pendientes; una
+suspensión normal conserva el navegador abierto.
+
+Para acciones irreversibles autorizadas por el usuario, pasa
+`authorized_goals: ["Objetivo exacto autorizado"]` fuera del código. El programa
+no puede activar `allow_irreversible`. Las comprobaciones `check` son probabilidades;
+usa `verify` para las condiciones deterministas disponibles.
+
+Prueba con el backend real configurado en `.env`:
+
+```bash
+node --env-file=.env examples/code-mode.mjs
+```
+
+La suite `npm test` usa MCP y Chromium reales con respuestas HTTP simuladas para
+ambas configuraciones. El ejemplo anterior consulta el modelo real y verifica
+los campos del DOM. Code Mode no cambia la precisión ni la latencia de inferencia
+de Laya/Jev. Para rutas lineales, puedes seguir usando `browser_run`.
+
+## Descargas del navegador
+
+Las descargas se guardan en `~/Downloads/laya-browser` por defecto. Configura
+`JEV_BROWSER_DOWNLOADS_DIR` en el entorno del proceso MCP para cambiar el destino.
+`browser_act` y `browser_do` incluyen las descargas de la sesión; usa
+`browser_wait_for_download` para esperar el fin de una transferencia y
+`browser_downloads` para consultar su estado, tamaño y ruta persistente. La ruta
+corresponde al equipo donde se ejecuta el servidor MCP.
+
+En `browser_run`, un paso puede exigir que termine una descarga nueva:
+
+```json
+{
+  "goal": "Descargar el CSV de errores",
+  "verify": { "download": { "filename": "errores.csv", "timeout_ms": 30000 } }
+}
+```
+
 ## 6. Ver CPU y RAM de Laya
 
 En otra terminal, desde la raíz del repositorio:
