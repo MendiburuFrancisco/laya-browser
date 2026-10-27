@@ -130,3 +130,43 @@ test("decision budgets and cancellation are sticky before inference or actions",
   controller.abort(new Error("cancelled"));
   await assert.rejects(b.open("data:text/html,late"), /cancelled/);
 });
+
+test("operation failures retain method, multiline cause and completed progress on consecutive runs", async () => {
+  const invoke = async method => {
+    if (method === "open") throw new Error("browser launch failed\nBrowser logs:\nSingletonLock: profile already in use", { cause: new Error("process exited with code 21") });
+    return { p_yes: 1 };
+  };
+  for (let i = 0; i < 2; i++) {
+    const r = await executeCode({ code: `await browser.check({question:'ready'}); await browser.open({url:'https://example.test'});` }, { invoke });
+    assert.equal(r.failed_operation, 2);
+    assert.equal(r.failed_method, "open");
+    assert.equal(r.progress[0].status, "done");
+    assert.match(r.error.message, /Browser logs:[\s\S]*process exited/);
+    assert.match(r.error.hint, /profile/);
+  }
+});
+
+test("timeout includes nested run progress and cleanup failure does not hide the original error", async () => {
+  const r = await executeCode({ code: `await browser.run({steps:[{goal:'first'},{goal:'second'}]});`, timeout_ms: 500 }, {
+    invoke: async (_, __, { signal, onProgress }) => {
+      onProgress({ completed: 1, total: 2, phase: "step", step: 2, goal: "second" });
+      await new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }));
+      throw new Error("context closed during cancellation");
+    },
+    onAbort: async () => { throw new Error("cleanup failed"); },
+  });
+  assert.equal(r.status, "timeout");
+  assert.equal(r.failed_method, "run");
+  assert.match(r.info, /500 ms.*browser.run/);
+  assert.equal(r.progress[0].plan.completed, 1);
+  assert.equal(r.progress[0].plan.step, 2);
+  assert.equal(r.progress[0].status, "timeout");
+  assert.match(r.cleanup_error.message, /cleanup failed/);
+});
+
+test("Code Mode do retains action errors and explains non-done statuses", async () => {
+  const b = { do: async () => ({ status: "stuck", actions: [{ action: "click", error: "target is disabled" }] }) };
+  const r = await executeCode({ code: `await browser.do({goal:'submit'});` }, { invoke: (method, args) => invokeBrowser(b, method, args) });
+  assert.match(r.info, /progress/);
+  assert.equal(r.suspended.result.action_errors[0].error, "target is disabled");
+});

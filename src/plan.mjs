@@ -1,32 +1,48 @@
+import { errorDiagnostic, stoppedInfo, actionFailures } from "./diagnostics.mjs";
+
 // Successful steps stay inside the MCP process; return at completion or a problem.
-export async function runPlan(b, steps, { url, log = () => {} } = {}) {
+export async function runPlan(b, steps, { url, log = () => {}, onProgress = () => {} } = {}) {
   const started = Date.now(), calls = b.stats.calls;
-  let completed = 0, current = 0;
+  let completed = 0, current = 0, phase = url ? "navigation" : "step";
   const summary = () => ({ completed, total: steps.length, remaining: steps.length - completed,
-    decision_calls: b.stats.calls - calls, ms: Date.now() - started, url: b.page.url() });
-  const failed = result => ({ ...summary(), status: result.status, failed_step: current + 1, goal: steps[current].goal,
-    ...Object.fromEntries(["info", "pending", "candidates", "page_text"].filter(k => result[k] !== undefined).map(k => [k, result[k]])) });
+    decision_calls: b.stats.calls - calls, ms: Date.now() - started, url: b.page?.url() ?? null });
+  const failed = result => ({ ...summary(), status: result.status, phase, failed_step: current + 1, goal: steps[current]?.goal,
+    info: stoppedInfo(result), ...actionFailures(result),
+    resume: "Inspect the failure and current page, then resume the failed step and remaining tail only. Completed effects are not rolled back.",
+    ...Object.fromEntries(["pending", "candidates", "page_text", "error", "verification_failures"].filter(k => result[k] !== undefined).map(k => [k, result[k]])) });
   try {
+    onProgress({ ...summary(), phase, step: 1, goal: steps[0]?.goal });
     if (url) await b.open(url);
     for (const [i, step] of steps.entries()) {
       current = i;
+      phase = "step";
+      onProgress({ ...summary(), phase, step: i + 1, goal: step.goal });
       const downloadBaseline = b.downloads?.items.at(-1)?.id ?? "";
       const result = await b.do(step.goal, { values: step.values ?? {}, maxActions: step.max_actions ?? 10,
         allowIrreversible: step.allow_irreversible === true, log });
       if (result.status !== "done") return failed(result);
       if (step.verify) {
-        if (!await verifyStep(b, step, downloadBaseline)) return failed({ status: "verification_failed",
-          info: "The step was rated done, but a supplied page postcondition failed." });
+        phase = "verification";
+        onProgress({ ...summary(), phase, step: i + 1, goal: step.goal });
+        const verification_failures = await verificationFailures(b, step, downloadBaseline);
+        if (verification_failures.length) return failed({ status: "verification_failed",
+          info: "The step was rated done, but a supplied page postcondition failed.", verification_failures });
       }
       completed++;
+      onProgress({ ...summary(), phase, step: i + 1, goal: step.goal });
     }
     return { status: "done", ...summary() };
   } catch (error) {
-    return failed({ status: "error", info: String(error.message).split("\n")[0] });
+    const diagnostic = errorDiagnostic(error, { phase });
+    return failed({ status: error.status ?? "error", info: diagnostic.message, error: diagnostic });
   }
 }
 
 export async function verifyStep(b, step, downloadBaseline = "") {
+  return (await verificationFailures(b, step, downloadBaseline)).length === 0;
+}
+
+export async function verificationFailures(b, step, downloadBaseline = "") {
   await b.settle();
   const page = await b.snapshot(), checks = [], spec = step.verify;
   if (spec.url_includes !== undefined) checks.push(page.url.includes(spec.url_includes));
@@ -41,5 +57,6 @@ export async function verifyStep(b, step, downloadBaseline = "") {
     const waited = await b.downloads.wait({ afterId: downloadBaseline, timeoutMs: spec.download.timeout_ms ?? 30000, signal: b.execution?.signal });
     checks.push(waited.downloads.some(item => item.status === "completed" && (!spec.download.filename || item.filename === spec.download.filename)));
   }
-  return checks.every(Boolean);
+  // Report condition names only: expected/actual field values can be credentials.
+  return ["url_includes", "text_includes", "field", "download"].filter(key => spec[key] !== undefined).filter((_, i) => !checks[i]);
 }

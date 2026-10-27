@@ -2,8 +2,8 @@
 // `assert` is a JS function source evaluated in the page after the step (ground truth for tests).
 import { JevBrowser } from "./session.mjs";
 
-export async function runFlow(flow, { headed = false, slowMo = 0, browser, log = console.log, stopOnFail = flow.stopOnFail !== false, allowIrreversible = false } = {}) {
-  const b = await JevBrowser.launch({ headed, slowMo, browser });
+export async function runFlow(flow, { headed = false, slowMo = 0, browser, recordVideo, log = console.log, stopOnFail = flow.stopOnFail !== false, allowIrreversible = false } = {}) {
+  const b = await JevBrowser.launch({ headed, slowMo, browser, recordVideo });
   const t0 = Date.now(); const results = [];
   try {
     await b.open(flow.url);
@@ -26,5 +26,5 @@ export async function runFlow(flow, { headed = false, slowMo = 0, browser, log =
   } finally {
     await b.close();
   }
-  return { name: flow.name, results, total_ms: Date.now() - t0, ...b.stats, passed: results.filter(r => r.ok).length, steps: flow.steps.length };
+  return { name: flow.name, results, total_ms: Date.now() - t0, ...b.stats, ...b.videos.list(), passed: results.filter(r => r.ok).length, steps: flow.steps.length };
 }

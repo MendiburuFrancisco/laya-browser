@@ -16,3 +16,4 @@ examples/appointment-demo.mjs
 .playwright-mcp/
 .DS_Store
 evals/results/
+.executor-data/

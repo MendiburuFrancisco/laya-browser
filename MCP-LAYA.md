@@ -11,6 +11,160 @@ Hay dos procesos que deben estar activos:
 El cliente MCP envía objetivos al servidor Node, que lee la página con Playwright,
 consulta Laya localmente y ejecuta las acciones en el navegador.
 
+### Visión y selección Box: exclusivas de Jev
+
+Al configurar `JEV_BACKEND=jev`, `browser_do` puede tomar una captura para validar
+contenido visual o encontrar un objetivo que no aparece en el DOM. Jev puede
+seleccionar el objetivo mediante el primitivo `box` de TypeSafe.
+
+También se exponen `browser_box({target})`, `browser_act_box({box_id,goal,action?})`
+y `visual:true` en `browser_check`/`browser_choose`. En Code Mode usa
+`browser.box({target})`, `browser.actBox({box_id,goal})` y
+`browser.check({question,visual:true})`. Las capturas se envían al proveedor Jev;
+los campos de contraseña y secretos conocidos se enmascaran.
+
+La selección exige presencia única y confianza suficiente. Los IDs son de un solo
+uso y dejan de ser válidos si cambian los píxeles, scroll, viewport o pestaña.
+Los umbrales exclusivos de imágenes se configuran en `.env` o en el entorno del MCP:
+
+```dotenv
+JEV_IMAGE_MIN_PRESENCE=0.70
+JEV_IMAGE_MIN_CONFIDENCE=0.70
+```
+
+El primero controla `p_visible` y el segundo la confianza del Box. Sin configurar,
+sus valores son `0.85` y `0.60`. No modifican los umbrales del DOM, las probabilidades
+de las validaciones ni las autorizaciones. Las respuestas Box incluyen `thresholds`
+con los valores efectivos; reinicia el MCP para cargar código o entorno actualizado.
+
+Se mantienen las autorizaciones de acciones irreversibles y los presupuestos de
+Code Mode. Jev 1.14+ es necesario: el alias `jev-latest` se cambia a `jev-preview`
+solo en solicitudes visuales; los modelos fijados explícitamente se conservan.
+
+Con Laya estas herramientas no se registran y las llamadas visuales desde Code
+Mode se rechazan antes de consultar al modelo. Consulta los ejemplos completos en
+[README.md](README.md#jev-screenshot-validation-and-box-targets).
+
+## Ejecutar conversaciones en navegadores independientes
+
+El MCP admite varias sesiones dentro del mismo proceso, con Laya y con Jev.
+Cada conversación debe invocar **una vez** `browser_create_session` con `{}` y
+conservar el `session_id` generado. Después debe enviarlo en **todas** sus llamadas
+al navegador. No existe una selección global de sesión activa.
+
+Ejemplo de llamadas MCP para una conversación:
+
+```text
+browser_create_session({}) → {session_id: "<id-A>", state: "idle"}
+browser_open({session_id: "<id-A>", url: "https://example.com"})
+browser_snapshot({session_id: "<id-A>"})
+browser_do({session_id: "<id-A>", goal: "Iniciar sesión", values: {...}})
+browser_execute({session_id: "<id-A>", code: "return await browser.listTabs();"})
+browser_close({session_id: "<id-A>"})
+```
+
+La otra conversación crea su propio ID y utiliza el mismo patrón. Se puede
+proporcionar un nombre único en `browser_create_session({session_id: "prueba-A"})`;
+un nombre duplicado se rechaza para evitar compartir un navegador por accidente.
+Los nombres admiten 1–80 letras ASCII, números, guiones y guiones bajos;
+`default` está reservado. Es preferible dejar que el servidor genere los IDs.
+
+- Cada sesión inicia su propio proceso de navegador al primer uso y tiene cookies,
+  almacenamiento, pestañas, snapshots, tráfico de red y bloqueo de ejecución propios.
+- Sesiones distintas pueden trabajar simultáneamente. Dos operaciones simultáneas
+  sobre la misma sesión se rechazan explícitamente mientras esté ocupada.
+- `browser_execute` fija la sesión para todo el programa: las llamadas internas
+  `browser.*` no necesitan `session_id` ni pueden cambiar de sesión.
+- Cerrar o cancelar una sesión no afecta a las otras. `browser_close` finaliza sus
+  vídeos y deja el ID disponible para volver a abrir un navegador limpio; si hay
+  perfil persistente, conserva el almacenamiento que Chromium persista en disco.
+- `browser_list_sessions({})` muestra IDs, estado (`idle`/`started`) y `busy` sin
+  cambiar de navegador. Los IDs pertenecen a la instancia del servidor MCP.
+- Con sesiones nombradas, perfiles, descargas, vídeos y caché se separan bajo
+  `sessions/<id-del-proceso>/<session_id>/` dentro de las rutas configuradas
+  (para la caché, dentro de la carpeta que contiene el archivo configurado).
+  El namespace del proceso evita conflictos entre procesos MCP que usen las mismas
+  rutas base. Los perfiles nombrados se reutilizan al reabrir el mismo ID en ese
+  proceso, pero no se recuperan automáticamente tras reiniciar el MCP.
+
+Por compatibilidad, sin crear sesiones nombradas las llamadas sin `session_id`
+siguen usando el navegador predeterminado y las rutas originales. Desde que se
+crea una sesión nombrada, omitir el selector produce un error: no se elige un
+navegador ajeno silenciosamente. Si ya existía `default`, se puede seguir usando
+explícitamente con `session_id: "default"`.
+
+**Reinicia/reconecta el MCP tras actualizar** para cargar el código y descubrir los
+parámetros nuevos. Instrucción sugerida para cada conversación:
+
+> Crea una sesión independiente con browser_create_session, conserva el ID y
+> pásalo como session_id en todas las herramientas del navegador. Ejecuta el caso
+> de prueba en esa sesión y ciérrala al terminar.
+
+## Cambiar entre pestañas
+
+Para crear y activar una pestaña usa `browser_new_tab` con `{"url":"https://example.com/"}`,
+o `{}` para abrir `about:blank`. En Code Mode: `await browser.newTab({ url })`
+o `await browser.newTab()`. Devuelve `{status,id,url,title,active}`, comparte cookies
+y almacenamiento del contexto actual y no consulta al modelo.
+
+Invoca `browser_list_tabs` con `{}` para obtener `{tabs:[{id,url,title,active}]}`.
+Usa `browser_select_tab` con un único selector: `{"id":"tab-1"}`,
+`{"url":"https://example.com/"}` o `{"title":"Example"}`. URL y título deben
+coincidir exactamente con una sola pestaña; si hay varias coincidencias, usa el ID.
+Los IDs son estables durante la sesión y no se reutilizan al cerrar pestañas.
+Ambas herramientas funcionan sin consultar al modelo.
+
+En Code Mode:
+
+```js
+const { tabs } = await browser.listTabs();
+const target = tabs.find(tab => tab.id === values.tab_id);
+if (!target) return { found: false };
+await browser.selectTab({ id: target.id });
+return await browser.snapshot();
+```
+
+Después de cambiar, toma un snapshot nuevo antes de usar números de elementos.
+Las pestañas nuevas siguen activándose automáticamente; al cerrar la activa se
+selecciona la última restante. `browser_open` navega la pestaña activa y
+`browser_close` cierra la sesión completa. Reinicia o reconecta el cliente MCP
+para descubrir las herramientas nuevas.
+
+## Obtener el HTML completo bajo demanda
+
+Invoca `browser_get_html` con `{}` para recibir `{url, html}` con el DOM actual
+completo de la página principal, incluido el doctype y los cambios de JavaScript.
+Se devuelve únicamente al solicitarlo, sin truncamiento ni consultas al modelo;
+no se adjunta a snapshots ni a prompts de decisión. No incorpora el contenido
+interno de iframes, shadow roots ni recursos externos. Puede contener datos sensibles.
+
+En Code Mode usa `await browser.getHtml()`. Los límites generales de memoria y
+salida de `browser_execute` siguen aplicándose; ajusta `max_output_chars` si necesitas
+devolver un documento grande. Reinicia o reconecta el MCP para descubrir la herramienta.
+
+## Inspeccionar llamadas API de la sesión actual
+
+Las herramientas `list_network_requests` y `get_network_request` observan el tráfico
+del mismo navegador que controla Laya. La captura comienza al iniciar la sesión y
+se conserva entre navegaciones y pestañas; no hace falta reproducir el estado.
+
+1. Navega y realiza la acción con las herramientas habituales.
+2. Llama a `list_network_requests` con `{"resource_types":["fetch","xhr"]}`.
+   Puedes añadir `url_contains`, `page` y `page_size` (máximo 100).
+3. Pasa un `id` de la lista a `get_network_request`: `{"id":"<id observado>"}`.
+
+El detalle incluye headers completos, payload y cuerpo de respuesta. Los cuerpos
+indican `encoding` (`utf8` o `base64`), tamaño y truncamiento; los que todavía no
+terminaron o no están disponibles se identifican explícitamente. Se conservan las
+últimas 500 solicitudes en memoria; `dropped` indica descartes. Cada cuerpo devuelto
+tiene un límite de 1 MiB. No se capturan mensajes WebSocket.
+
+También están disponibles en `browser_execute` como
+`browser.listNetworkRequests({...})` y `browser.getNetworkRequest({id})`, sin
+consultar al modelo. Los headers y cuerpos pueden contener credenciales o datos
+sensibles y se devuelven al cliente MCP; no se añaden automáticamente a los prompts
+de decisión. Reinicia o reconecta el MCP para descubrir las herramientas nuevas.
+
 ## 1. Requisitos e instalación
 
 - Node.js 20 o superior.
@@ -299,6 +453,33 @@ efectos ya realizados no se revierten. Si vence el tiempo o se cancela durante
 una operación activa, se cierra la sesión para detener acciones pendientes; una
 suspensión normal conserva el navegador abierto.
 
+### Diagnóstico de fallos en Code Mode y planes
+
+Cuando una ejecución se detiene, revisa estos campos antes de volver a intentarlo:
+
+- `info`: explicación del motivo de parada.
+- `failed_operation` y `failed_method`: número de llamada y método de Code Mode que falló.
+- `error`: mensaje multilínea original y causas encadenadas, con `phase`, `name`,
+  `code` cuando existe y `hint` para fallos reconocidos. Los detalles se limitan a
+  6000 caracteres, indicando explícitamente si se recortaron.
+- `suspended.result`: en un `browser.run`, contiene `failed_step`, `goal`,
+  `completed`, `remaining` y la fase (`navigation`, `step` o `verification`).
+  `verification_failures` identifica las condiciones incumplidas sin devolver
+  valores de campos; `action_errors` conserva hasta tres errores de acciones recientes.
+- `progress[].plan`: progreso del plan anidado, también disponible si vence el
+  tiempo durante un paso. `cleanup_error` informa por separado si falla la limpieza.
+
+Por ejemplo, un ejecutable inexistente se informa en la fase `browser_launch`
+con la causa de Playwright y una indicación para revisar `JEV_BROWSER` o instalar
+Chromium. Un perfil ocupado conserva los logs de lanzamiento y orienta a cerrar
+el proceso que lo usa o elegir otro perfil. Los fallos de conexión al modelo
+incluyen el proveedor, endpoint, modelo y número de intentos.
+
+Las llamadas consecutivas conservan su propio resultado en `progress`: si la
+segunda falla, reanuda únicamente el trabajo pendiente según `resume`. No repitas
+automáticamente los pasos completados. En herramientas MCP directas, las
+excepciones se devuelven como `isError: true` con un objeto JSON de diagnóstico.
+
 Para acciones irreversibles autorizadas por el usuario, pasa
 `authorized_goals: ["Objetivo exacto autorizado"]` fuera del código. El programa
 no puede activar `allow_irreversible`. Las comprobaciones `check` son probabilidades;
@@ -400,6 +581,34 @@ también `JEV_API_URL`. Si el MCP corre en un contenedor o en otra máquina,
 Puede haber un servidor Laya activo. Comprueba `/health` antes de iniciar otro.
 Para usar otro puerto, inicia Laya con `--port 8795` y cambia `JEV_API_URL` a
 `http://127.0.0.1:8795/v1/systemone`.
+
+### Grabar vídeo de la sesión
+
+En una sesión nueva, llama a `browser_open` con:
+
+```json
+{
+  "url": "https://example.com",
+  "record_video": {
+    "dir": "./videos",
+    "size": { "width": 1280, "height": 800 }
+  }
+}
+```
+
+También se admite `record_video` en `browser_run`. Se graba un WebM sin audio por pestaña, incluidas las ventanas emergentes, tanto en modo visible como headless. `size` es opcional; por defecto Playwright ajusta el viewport para que quepa dentro de 800×800. La grabación empieza al lanzar la sesión y requiere cerrarla para cambiar su configuración.
+
+Consulta el estado con `browser_videos` o `await browser.videos({})` desde Code Mode. Para guardar la evidencia, llama a **`browser_stop_recording`** o `await browser.stopRecording({})`: espera a finalizar los vídeos y devuelve sus rutas absolutas en `videos`, junto con el estado y tamaño de cada archivo, **sin cerrar el navegador, las pestañas ni la sesión autenticada**. Solo el estado `completed` indica que está listo. Los archivos se guardan en la máquina donde corre el servidor MCP.
+
+Para grabar otro tramo de la misma sesión, usa `browser_start_recording` o `await browser.startRecording({})`. Genera un nuevo archivo por pestaña abierta usando la carpeta y resolución configuradas; los archivos anteriores se conservan. Ambos controles son idempotentes: iniciar mientras ya se graba no duplica vídeos y detener de nuevo devuelve los resultados guardados. Mientras esté detenida, tampoco se graban pestañas nuevas. `browser_close` sigue guardando las grabaciones activas al cerrar, pero ya no es necesario para finalizar un vídeo.
+
+```js
+const saved = await browser.stopRecording({});
+await browser.startRecording({}); // opcional: otro tramo, conservando el login
+return saved;
+```
+
+Para grabar automáticamente cada sesión, configura `JEV_BROWSER_VIDEO_DIR` en el entorno del servidor MCP. `record_video: null` desactiva ese valor para una sesión. Reinicia o reconecta el cliente MCP para descubrir los nuevos controles de grabación. Si falta el ejecutable de FFmpeg de Playwright, ejecuta `npx playwright install ffmpeg`.
 
 ### No aparece el parámetro `viewport`
 

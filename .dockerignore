@@ -1,0 +1,17 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+.venv
+.venv-rocm
+.profile
+sessions
+bench/results
+evals/results
+*.webm
+*.png
+coverage
+test
+local
+CODE-MODE-AGENT.md

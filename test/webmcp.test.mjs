@@ -92,6 +92,7 @@ function stubJev(b, script) {
     for (const [k, q] of Object.entries(questions)) {
       const want = over[k];
       if (q.type === "noul") answers[k] = { noul: want ?? 0 };
+      else if (q.type === "box") answers[k] = { box: { left: 0, top: 0, right: 1, bottom: 1 }, confidence: 0 };
       else { const c = want ?? Object.keys(q.criteria)[0]; answers[k] = { choice: c, probabilities: { [c]: 1 }, confidence: 1 }; }
     }
     return { answers, ms: 1, tokens: 0 };

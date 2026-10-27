@@ -51,3 +51,41 @@ test("plan waits for a new matching download during step verification", async ()
   assert.equal(result.status, "done");
   assert.equal(result.completed, 1);
 });
+
+test("navigation failure preserves multiline driver details and nested network cause", async () => {
+  const { b, invoked } = fake([]);
+  b.open = async () => { throw new Error("page.goto failed\nCall log:\n  navigating to destination", { cause: Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" }) }); };
+  const r = await runPlan(b, [{ goal: "first" }], { url: "https://example.test" });
+  assert.equal(r.phase, "navigation");
+  assert.equal(r.completed, 0);
+  assert.equal(invoked.length, 0);
+  assert.match(r.error.message, /Call log:[\s\S]*ECONNREFUSED/);
+  assert.match(r.error.hint, /network/);
+});
+
+test("stopped plans explain exhausted actions and preserve the last action failures", async () => {
+  const { b } = fake([]);
+  b.do = async () => ({ status: "max_actions", actions: [{ action: "click", element: "Submit", error: "target is disabled" }] });
+  const r = await runPlan(b, [{ goal: "submit" }, { goal: "continue" }]);
+  assert.match(r.info, /max_actions/);
+  assert.equal(r.action_errors[0].error, "target is disabled");
+  assert.equal(r.remaining, 2);
+  assert.match(r.resume, /remaining tail/);
+});
+
+test("verification identifies failed conditions independently of property order without field secrets", async () => {
+  const { b } = fake(["done"]);
+  const r = await runPlan(b, [{ goal: "verify", values: { password: "super-secret" }, verify: {
+    field: { label: "Email", value_key: "password" }, text_includes: "Ready", url_includes: "/missing",
+  } }]);
+  assert.equal(r.phase, "verification");
+  assert.deepEqual(r.verification_failures, ["url_includes", "field"]);
+  assert.ok(!JSON.stringify(r).includes("super-secret"));
+});
+
+test("plan preserves execution stop status instead of converting budget exhaustion to error", async () => {
+  const { b } = fake([]);
+  b.do = async () => { throw Object.assign(new Error("Decision call budget exhausted"), { status: "limit_exceeded" }); };
+  const r = await runPlan(b, [{ goal: "first" }]);
+  assert.equal(r.status, "limit_exceeded");
+});

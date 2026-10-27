@@ -9,7 +9,35 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const serverPath = fileURLToPath(new URL("../bin/laya-browser-mcp.mjs", import.meta.url));
-const fixtureUrl = "data:text/html," + encodeURIComponent('<title>Code Mode fixture</title><label for="name">Name</label><input id="name"><p>Ready</p>');
+const fixtureUrl = "data:text/html," + encodeURIComponent('<title>Code Mode fixture</title><label for="name">Name</label><input id="name"><p>Ready</p><a href="about:blank" target="_blank">Open tab</a>');
+
+test("MCP reports browser launch diagnostics on every consecutive Code Mode/direct run failure", async () => {
+  const client = new Client({ name: "launch-failure-test", version: "0" });
+  const env = { ...process.env, JEV_BROWSER: "/nonexistent-laya-test/browser.exe", JEV_BROWSER_PROFILE: "", JEV_BROWSER_HEADED: "0", JEV_BROWSER_NO_INSTALL: "1" };
+  delete env.JEV_BROWSER_VIDEO_DIR;
+  await client.connect(new StdioClientTransport({ command: process.execPath, args: [serverPath], env: {
+    ...env,
+  } }));
+  try {
+    for (let i = 0; i < 2; i++) {
+      const reply = await client.callTool({ name: "browser_execute", arguments: {
+        code: `await browser.run({url:'https://example.test',steps:[{goal:'Ready'}]});`,
+      } });
+      const r = JSON.parse(reply.content[0].text);
+      assert.equal(r.status, "error");
+      assert.equal(r.failed_method, "run");
+      assert.equal(r.error.phase, "browser_launch");
+      assert.match(r.info, /was not found/);
+      assert.match(r.error.message, /Caused by:/);
+      assert.match(r.error.hint, /JEV_BROWSER/);
+    }
+    const reply = await client.callTool({ name: "browser_run", arguments: { steps: [{ goal: "Ready" }] } });
+    assert.equal(reply.isError, true);
+    const r = JSON.parse(reply.content[0].text);
+    assert.equal(r.error.phase, "browser_launch");
+    assert.match(r.error.message, /was not found/);
+  } finally { await client.close(); }
+});
 
 for (const backend of ["jev", "laya"]) {
   test(`Code Mode MCP works with ${backend} configuration and preserves direct tools`, async () => {
@@ -46,7 +74,7 @@ for (const backend of ["jev", "laya"]) {
     };
     try {
       const tools = (await client.listTools()).tools.map(t => t.name);
-      for (const name of ["browser_execute", "browser_run", "browser_downloads", "browser_webmcp_tools", "browser_webmcp_call"]) assert.ok(tools.includes(name), name);
+      for (const name of ["browser_execute", "browser_run", "browser_downloads", "browser_webmcp_tools", "browser_webmcp_call", "browser_get_html", "browser_list_tabs", "browser_select_tab", "browser_new_tab"]) assert.ok(tools.includes(name), name);
       const docs = await client.readResource({ uri: "browser://code-mode/api" });
       assert.match(docs.contents[0].text, /BrowserCodeAPI/);
       const result = await call("browser_execute", { values: { url: fixtureUrl, names: ["Ada", "Grace"] }, code: `
@@ -66,6 +94,81 @@ for (const backend of ["jev", "laya"]) {
       assert.ok(result.decision_calls >= 5);
       assert.ok(requests.every(r => r.model === `${backend}-fixture`));
       assert.ok(requests.some(r => r.state.page?.elements?.some(e => e.value === "Grace")));
+
+      const consecutive = await call("browser_execute", { code: `
+        await browser.run({steps:[{goal:'Ready'}]});
+        await browser.run({steps:[{goal:'Ready'},{goal:'Stop here'},{goal:'Must not run'}]});
+        return 'must not finish';
+      ` });
+      assert.equal(consecutive.status, "blocked");
+      assert.equal(consecutive.failed_operation, 2);
+      assert.equal(consecutive.failed_method, "run");
+      assert.equal(consecutive.progress[0].status, "done");
+      assert.equal(consecutive.suspended.result.failed_step, 2);
+      assert.equal(consecutive.suspended.result.completed, 1);
+      assert.match(consecutive.info, /blocks progress/);
+
+      const beforeTabs = requests.length;
+      const firstTab = (await call("browser_list_tabs")).tabs.find(t => t.active);
+      const popupSnapshot = await client.callTool({ name: "browser_snapshot", arguments: { filter: "Open tab" } });
+      const linkId = Number(popupSnapshot.content[0].text.match(/\[(\d+)\] a/)[1]);
+      await call("browser_act", { action: "click", element: linkId });
+      let popupTabs;
+      const popupDeadline = Date.now() + 5000;
+      do { popupTabs = (await call("browser_list_tabs")).tabs; }
+      while (popupTabs.length < 2 && Date.now() < popupDeadline);
+      assert.equal(popupTabs.length, 2);
+      const popupTab = popupTabs.find(t => t.active);
+      assert.notEqual(popupTab.id, firstTab.id);
+      assert.equal((await call("browser_select_tab", { title: firstTab.title })).id, firstTab.id);
+      const switched = await call("browser_execute", { values: { id: popupTab.id }, code: `
+        await browser.selectTab({id:values.id});
+        return await browser.listTabs();
+      ` });
+      assert.equal(switched.status, "done", switched.info);
+      assert.equal(switched.result.tabs.find(t => t.active).id, popupTab.id);
+      assert.equal(switched.decision_calls, 0);
+      assert.equal((await call("browser_select_tab", { url: firstTab.url })).id, firstTab.id);
+      const invalidTab = await client.callTool({ name: "browser_select_tab", arguments: { id: "missing" } });
+      assert.equal(invalidTab.isError, true);
+      assert.equal((await call("browser_list_tabs")).tabs.find(t => t.active).id, firstTab.id);
+      const blankTab = await call("browser_new_tab");
+      assert.equal(blankTab.status, "done");
+      assert.equal(blankTab.url, "about:blank");
+      assert.equal(blankTab.active, true);
+      assert.equal((await call("browser_list_tabs")).tabs.length, 3);
+      const destination = "data:text/html,<title>Explicit new tab</title><p>Created</p>";
+      const createdTab = await call("browser_new_tab", { url: destination });
+      assert.equal(createdTab.url, destination);
+      assert.equal(createdTab.title, "Explicit new tab");
+      assert.equal((await call("browser_list_tabs")).tabs.find(t => t.active).id, createdTab.id);
+      const newTabCode = await call("browser_execute", { code: `
+        const tab = await browser.newTab();
+        return {tab,tabs:(await browser.listTabs()).tabs};
+      ` });
+      assert.equal(newTabCode.status, "done", newTabCode.info);
+      assert.equal(newTabCode.result.tab.url, "about:blank");
+      assert.equal(newTabCode.result.tabs.length, 5);
+      assert.equal(newTabCode.decision_calls, 0);
+      await call("browser_select_tab", { id: firstTab.id });
+      const preserved = await client.callTool({ name: "browser_snapshot", arguments: {} });
+      assert.match(preserved.content[0].text, /Grace/);
+      assert.equal(requests.length, beforeTabs, "tab management needs no inference");
+
+      const htmlUrl = "data:text/html," + encodeURIComponent('<!DOCTYPE html><title>HTML fixture</title><script>document.addEventListener("DOMContentLoaded",()=>{const p=document.createElement("p");p.id="dynamic";p.textContent="' + "x".repeat(25000) + '";document.body.append(p)})</script><body>Ready</body>');
+      await call("browser_open", { url: htmlUrl });
+      const beforeHtml = requests.length;
+      const html = await call("browser_get_html");
+      assert.equal(html.url, htmlUrl);
+      assert.match(html.html, /^<!DOCTYPE html>/i);
+      assert.ok(html.html.includes('<p id="dynamic">' + "x".repeat(25000) + '</p>'), "complete live DOM without truncation");
+      const codeHtml = await call("browser_execute", { code: `const page = await browser.getHtml(); return {length:page.html.length,doctype:page.html.startsWith('<!DOCTYPE html>')};` });
+      assert.equal(codeHtml.status, "done", codeHtml.info);
+      assert.equal(codeHtml.result.length, html.html.length);
+      assert.equal(codeHtml.result.doctype, true);
+      assert.equal(codeHtml.decision_calls, 0);
+      assert.equal(requests.length, beforeHtml, "HTML retrieval needs no inference");
+      await call("browser_open", { url: fixtureUrl });
 
       const stopped = await call("browser_execute", { code: `await browser.do({goal:'Stop here'}); await browser.open({url:'data:text/html,wrong'});` });
       assert.equal(stopped.status, "blocked");

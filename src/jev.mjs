@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // Read only recognised settings from .env, without modifying the process environment.
-function setting(name, fallback) {
+export function setting(name, fallback) {
   if (process.env[name] !== undefined) return process.env[name];
   const files = process.env.JEV_BROWSER_MCP === "1" ? [resolve(ROOT, ".env")] : [resolve(process.cwd(), ".env"), resolve(ROOT, ".env")];
   for (const p of files) {
@@ -58,11 +58,16 @@ export function credentials() {
 }
 export const apiKey = () => credentials().key;
 
-// questions: { name: { type: "noul" | "choice" | "score", instructions, criteria? } }
-export async function jev(state, questions, { retries = 2, timeout = 60_000, signal } = {}) {
-  const { key, url, model, name } = BACKEND === "laya"
+// questions: { name: { type: "noul" | "choice" | "score" | "box", instructions, criteria? } }
+export async function jev(state, questions, { retries = 2, timeout = 60_000, signal, assets } = {}) {
+  const visual = !!assets || Object.values(questions).some(q => q.type === "box");
+  if (visual && BACKEND !== "jev") throw new Error("Images and box questions are available only with the Jev backend");
+  const { key, url, model: configuredModel, name } = BACKEND === "laya"
     ? { key: null, url: API_URL, model: MODEL, name: "Laya" }
     : credentials();
+  // The latest stable alias may still point at 1.13. Preserve explicitly pinned models.
+  const model = visual ? configuredModel.replace(/jev-latest$/, "jev-preview") : configuredModel;
+  if (visual && /(?:^|\/)jev-1\.(?:[0-9]|1[0-3])(?:\.|$)/.test(model)) throw new Error("Screenshot/Box requests require Jev 1.14+: set JEV_MODEL=jev-preview or jev-1.14.0");
   for (let attempt = 0; ; attempt++) {
     signal?.throwIfAborted();
     const t = performance.now();
@@ -70,15 +75,15 @@ export async function jev(state, questions, { retries = 2, timeout = 60_000, sig
     try {
       res = await fetch(url, {
         method: "POST",
-        headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), "Content-Type": "application/json" },
-        body: JSON.stringify({ state, model, questions }),
+        headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), "Content-Type": "application/json", ...(visual ? { "TypeSafe-Danger-Zone-Images": "true" } : {}) },
+        body: JSON.stringify({ state, model, questions, ...(assets ? { assets } : {}) }),
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout),
       });
       body = await res.json().catch(() => ({}));
     } catch (e) {
       signal?.throwIfAborted();
       if (attempt < retries) { await sleep(800 * (attempt + 1)); continue; }
-      throw e;
+      throw new Error(`${name} decision request failed after ${attempt + 1} attempts (${url}, model ${model})`, { cause: e });
     }
     const ms = Math.round(performance.now() - t);
     if (res.ok) return { answers: body.answers, ms, tokens: body.usage?.input_tokens ?? 0 };

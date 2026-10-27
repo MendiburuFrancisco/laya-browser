@@ -1,6 +1,6 @@
 # Privacy policy: jev-browser
 
-_Last updated: 2026-10-13_
+_Last updated: 2026-10-22_
 
 jev-browser is an open-source library, CLI, MCP server and Claude Code plugin. It runs entirely on
 your machine. The author operates no server for it, and it collects no analytics, telemetry or
@@ -18,6 +18,13 @@ passes them to TypeSafe. A request can contain:
   `browser_read`, it also contains blocks of the page's full text.
 - **Your instructions:** the `goal` of a step, the recent actions taken toward it, and the
   questions you ask with `browser_check` and `browser_choose`.
+- **Viewport screenshots (Jev only)** for explicit visual check/choose questions,
+  Box selection/actions, or automatic visual fallback during `browser_do`/plans/Code Mode.
+  Password fields and known secret text/input values are masked before capture.
+  Other visible content, including secrets drawn into images or canvas, can remain.
+  These images are sent to the configured Jev provider as image assets, resized/padded
+  within TypeSafe's limits. Images are held transiently in memory, not saved to disk;
+  Box IDs retain only geometry and a screenshot fingerprint.
 - **The `values` you pass** for it to type or select, except:
   - values whose key names a secret (`password`, `pw`, `pwd`, `token`, `secret`, `otp`, `card`,
     `cvv`, `cvc`, `ssn`, `api_key`, `pin`), which are sent as their key name only;
@@ -35,8 +42,15 @@ The browser also loads the websites you or your AI client direct it to, as any b
 
 ## What stays on your machine
 
-- **Screenshots and snapshots.** They are returned only to your MCP client, such as Claude Code.
-  What that client does with them is governed by its own policy.
+- **Explicit screenshot results.** `browser_screenshot` returns an image only to your
+  MCP client, such as Claude Code, without calling the decision backend. Jev's visual
+  decision screenshots are sent to the provider as described above. Laya never receives
+  screenshots or Box questions. What the MCP client does with results is governed by its policy.
+- **Observed website traffic.** The latest 500 requests are retained in session memory.
+  `list_network_requests` and `get_network_request` return traffic to your MCP client,
+  including full headers (cookies and authorization) and request/response bodies on
+  demand. These may contain sensitive data. Network details are not automatically
+  sent to the decision backend or written to disk; the log is cleared on session close.
 - **Your API key.** As a Claude Code plugin, the key is kept in Claude Code's secure credential
   store and passed to the local server as an environment variable. It is sent only to TypeSafe
   (or OpenRouter, for an OpenRouter key), as the `Authorization` header.
@@ -51,3 +65,6 @@ jev-browser is a developer tool and is not directed at children under 18.
 ## Contact
 
 Questions or concerns: open an issue at <https://github.com/Ying-Kai-Liao/jev-browser/issues>.
+## Video recordings
+
+Video recording is opt-in (`record_video`, `recordVideo`, CLI `--record-video=DIR`, or MCP `JEV_BROWSER_VIDEO_DIR`). Silent WebM files are saved locally to the configured directory and persist after the session closes. They capture visible page content, which can include personal data and entered values; snapshot redaction does not redact video frames. Recordings are not sent to the decision backend. Each tab has a separate file; `browser_stop_recording` finalizes all current recordings without closing the browser. Recording remains stopped until `browser_start_recording`. Closing the session also finalizes active recordings.

@@ -57,6 +57,8 @@
     "examples:jev": "node bench/compare-backends.mjs --backend jev --headed --repetitions 1 --pause-ms 3000 --out bench/results/jev-examples",
     "examples:laya": "node bench/compare-backends.mjs --backend laya --headed --repetitions 1 --pause-ms 3000 --out bench/results/laya-examples",
     "mcp": "node bin/laya-browser-mcp.mjs",
+    "executor": "node bin/laya-test-executor.mjs",
+    "executor:mcp": "node bin/laya-test-executor-mcp.mjs",
     "cost": "node bin/jev-cost.mjs",
     "setup": "npx playwright install chromium",
     "version": "node scripts/sync-plugin-version.mjs && git add .claude-plugin/plugin.json .mcp.json",
@@ -69,6 +71,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "playwright": "^1.63.0",
     "quickjs-emscripten": "^0.32.0",
+    "sharp": "^0.35.5",
     "zod": "^4.6.5"
   }
 }

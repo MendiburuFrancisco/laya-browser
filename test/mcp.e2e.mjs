@@ -24,9 +24,11 @@ async function call(name, args = {}) {
 
 try {
 const tools = (await client.listTools()).tools.map(t => t.name);
-assert.deepEqual(tools.sort(), ["browser_act", "browser_check", "browser_choose", "browser_close", "browser_do", "browser_downloads", "browser_execute", "browser_open", "browser_read", "browser_run", "browser_screenshot", "browser_snapshot", "browser_wait_for_download", "browser_webmcp_call", "browser_webmcp_tools"]);
+for (const name of ["browser_act", "browser_check", "browser_choose", "browser_close", "browser_do", "browser_downloads", "browser_execute", "browser_get_html", "browser_open", "browser_read", "browser_run", "browser_screenshot", "browser_snapshot", "browser_videos", "browser_wait_for_download", "browser_webmcp_call", "browser_webmcp_tools", "get_network_request", "list_network_requests"]) assert.ok(tools.includes(name), name);
 
-await call("browser_open", { url: "https://demo.playwright.dev/todomvc/" });
+const opened = await call("browser_open", { url: "https://demo.playwright.dev/todomvc/" });
+assert.equal(tools.includes("browser_box"), opened.backend === "jev");
+assert.equal(tools.includes("browser_act_box"), opened.backend === "jev");
 let r = await call("browser_do", { goal: "Add a todo item", values: { todo: "buy milk" } });
 assert.equal(r.status, "done");
 r = await call("browser_do", { goal: "Add a todo item", values: { todo: "walk the dog" }, explain: true });

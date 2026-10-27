@@ -17,8 +17,8 @@ caller's `values` (`text: values.g1 → "milk"`), never by writing text:
 
 https://github.com/user-attachments/assets/fe309fb8-aada-4187-a91e-f18493a39526
 
-Jev only answers with probability distributions: yes/no (`noul`), pick one option (`choice`)
-or a rating (`score`). It never writes text. So everything free-form comes from the caller as
+Jev answers typed questions: yes/no (`noul`), pick one option (`choice`), a rating (`score`),
+or a visual bounding box (`box`, Jev only). It never writes text. So everything free-form comes from the caller as
 candidates, and code turns disagreement or low confidence into a status the LLM can act on.
 
 ---
@@ -143,6 +143,41 @@ first browser call downloads Chromium for Playwright if it is missing (one time,
 Data: see [Privacy](#privacy). Page content goes to the TypeSafe API (or OpenRouter); passwords and other
 secrets you pass in `values` don't.
 
+## Independent browsers for concurrent conversations
+
+One MCP process can run multiple independent browser processes. At the start of
+**each conversation**, call `browser_create_session({})`, keep its generated
+`session_id`, and include it in **every** browser tool call:
+
+```text
+browser_create_session({}) → {session_id: "<unique-id>", state: "idle"}
+browser_open({session_id: "<unique-id>", url: "https://example.com"})
+browser_execute({session_id: "<unique-id>", code: "return await browser.listTabs();"})
+browser_close({session_id: "<unique-id>"})
+```
+
+Code Mode binds the whole program to that session; internal `browser.*` calls
+need no selector. There is no global active-session switch. Each session owns its
+cookies, storage, tabs, snapshots, network log and execution lease. Different
+sessions can operate concurrently; overlapping operations on the same session
+are rejected. Closing or cancelling one session leaves the others running.
+`browser_list_sessions({})` reports IDs, launch state and busy status without
+selecting a browser. A closed ID can be reopened within the same MCP process.
+
+Named sessions isolate configured profile, download, video and cache paths under
+`sessions/<server-namespace>/<session_id>/` (cache paths use the configured file's
+parent directory). Each server process has a unique namespace, preventing profile
+locks across MCP processes. Named profiles persist across close/reopen of the
+same ID in that process, but are not automatically recovered after server restart.
+Optional custom IDs must be unique, use 1–80 ASCII letters/digits/underscores/
+hyphens, and cannot be `default`. Prefer generated IDs.
+
+Legacy calls without a selector still work until a named session is created.
+After that, missing `session_id` is an error, preventing accidental cross-session
+control. A previously created legacy session remains accessible explicitly as
+`session_id: "default"`. Restart/reconnect the MCP client after upgrading to
+discover the new tools and parameters. See [the Spanish guide](MCP-LAYA.md#ejecutar-conversaciones-en-navegadores-independientes).
+
 ## Quick start (MCP, from npm)
 
 ```bash
@@ -170,11 +205,63 @@ npm test                         # offline tests (no network, no key)
 npm run test:e2e                 # MCP server end to end (network + key)
 ```
 
+## Local test executor for a backend
+
+This repository also includes an optional Docker-based local executor for a backend integration. It exposes a small authenticated HTTP API and a restricted MCP adapter (`tests_run`, `tests_logs`, `tests_results`); it does not include a UI and does not require mounting `docker.sock` into the agent. Start it with `docker compose -f compose.executor.yml` after setting `EXECUTOR_API_TOKEN`. See [docs/executor-local.md](docs/executor-local.md) for API details, suites, security controls, persistence, and validation steps.
+
 ### Local Laya backend (CPU or CUDA)
 
 This fork uses the [cklxx/laya-browser model on Hugging Face](https://huggingface.co/cklxx/laya-browser) as its browser decision checkpoint. It is a fine-tuned version of [Laya](https://huggingface.co/convaiinnovations/laya), a non-autoregressive model that answers typed questions without generating text.
 
 **Requirements:** Python 3.11+, Node.js 20+, and Internet access for the initial dependency installation and model download. CPU execution is supported; CUDA execution requires an NVIDIA GPU and a CUDA-compatible PyTorch installation.
+
+### Video recording
+
+Record the browser viewport as **silent WebM**, in headed or headless mode. Recording is opt-in and starts when the session launches. Each tab (including popups) gets its own file; this does not record the desktop or audio.
+
+With MCP, use `browser_open` (or `browser_run`) on a fresh session:
+
+```json
+{"url":"https://example.com", "record_video":{"dir":"./videos", "size":{"width":1280,"height":800}}}
+```
+
+`size` is optional; Playwright otherwise scales the viewport to fit within 800×800. `browser_videos()` lists recordings and their status; **call `browser_stop_recording()` to save them and receive their absolute paths without closing the browser, tabs or login session**. Only `completed` files are ready to use. Paths refer to the machine running the server. `browser_start_recording()` starts new video segments in the same directory for every open tab; calling start while already recording does not duplicate segments. While stopped, new tabs are not recorded. To change the directory or resolution, close and reopen the session. `browser_close()` also saves active recordings as part of cleanup.
+
+Set `JEV_BROWSER_VIDEO_DIR` in the MCP server environment to record every new session automatically; explicit `record_video: null` disables that default. Code Mode can inspect recordings with `await browser.videos({})`; enable recording first through `browser_open` or the environment.
+
+In Code Mode, save evidence and continue using the same session:
+
+```js
+const saved = await browser.stopRecording({});
+// Browser, form state and cookies remain available. Begin a new recorded segment:
+await browser.startRecording({});
+return saved;
+```
+
+Library and CLI:
+
+```js
+const b = await JevBrowser.launch({ recordVideo: { dir: "./videos" } });
+try {
+  await b.open("https://example.com");
+  const { videos } = await b.stopRecording();
+  console.log(videos); // completed files are usable while the browser stays open
+  await b.startRecording(); // optional: record another segment in the same session
+} finally {
+  await b.close();
+}
+```
+
+```sh
+laya-browser run examples/your-flow.json --record-video=./videos --json
+laya-browser do https://example.com "Open the menu" --record-video=./videos
+```
+
+`runFlow(flow, { recordVideo: { dir: "./videos" } })` also returns finalized `videos`. If Playwright reports a missing FFmpeg executable, run `npx playwright install ffmpeg` once.
+
+### Browser permissions
+
+New browser sessions automatically grant camera, microphone and notification permissions for all origins, including sessions using a persistent profile. Restart the MCP server and open a new browser session to apply changes. Camera and microphone access still requires available devices, operating-system permission and a secure context (HTTPS or localhost).
 
 ### Browser downloads
 
@@ -262,6 +349,90 @@ Hover, drag, right-click, upload and other keyboard actions remain available thr
 
 </details>
 
+### Switch between browser tabs
+
+Create and activate a tab with `browser_new_tab` and `{"url":"https://example.com/"}`,
+or `{}` for `about:blank`. Code Mode exposes `await browser.newTab({ url })` or
+`await browser.newTab()`. Both return `{ status, id, url, title, active }` and share
+the current context's cookies and storage. Creation does not call the decision model.
+
+Use `browser_list_tabs` with `{}` to get `{ tabs: [{ id, url, title, active }] }`.
+Select an existing tab with `browser_select_tab` and exactly one selector:
+`{"id":"tab-1"}`, `{"url":"https://example.com/"}`, or `{"title":"Example"}`.
+URL and title matches are exact; multiple matches fail instead of picking a tab.
+IDs are stable while the session is open and are not reused after a tab closes.
+These operations do not call the decision model.
+
+The same operations are available in Code Mode:
+
+```js
+const { tabs } = await browser.listTabs();
+const target = tabs.find(tab => tab.title === values.title);
+if (!target) return { found: false };
+await browser.selectTab({ id: target.id });
+return await browser.snapshot();
+```
+
+Take a fresh snapshot after switching before acting on element numbers. Newly
+opened tabs still become active automatically; closing the active tab selects
+the last remaining tab. `browser_open` navigates the active tab, and
+`browser_close` closes the session. Reconnect your MCP client to discover the new tools.
+
+### Get full HTML on demand
+
+Call `browser_get_html` with `{}` to return `{ url, html }` containing the full
+serialized main-frame DOM, including its doctype and JavaScript DOM changes.
+This is the current DOM, not the original HTTP response source. Iframe documents,
+shadow roots and external resources are not inlined. No truncation or inference
+is applied; HTML is returned only on this explicit call, never attached to normal
+snapshots or decision prompts. HTML is untrusted and can contain sensitive data.
+
+Code Mode exposes `await browser.getHtml()`. Its normal output and memory budgets
+still apply: extract the needed information inside the program or raise
+`max_output_chars` when returning a large HTML document.
+
+### Inspect the active session's network traffic
+
+`list_network_requests` and `get_network_request` inspect the browser Laya is already
+using, without a separate Chrome DevTools connection or replaying the page state.
+Capture starts when the browser session launches and spans navigations and tabs.
+
+```json
+// list_network_requests
+{"resource_types":["fetch","xhr"],"url_contains":"/api/","page":1,"page_size":50}
+// get_network_request — use an id from the list
+{"id":"<request id>"}
+```
+
+The list returns method, URL, resource type, lifecycle `state`, HTTP `status_code`,
+redirect links, failure and timestamps. Details add full header arrays (including
+Cookie/Authorization/Set-Cookie), request payload and response body. Bodies have
+`data`, `encoding` (`utf8` or `base64`), `bytes` and `truncated` fields.
+Network content is untrusted and may contain sensitive data. It is returned to the
+MCP caller, not included automatically in decision-model prompts.
+
+The latest 500 requests are retained in memory, oldest first; `dropped` reports
+evictions. Filters apply before pagination (default 50, maximum 100 per page).
+IDs remain valid across navigation until eviction or session close. Bodies are
+read on demand: pending/streaming, redirect and unavailable bodies are reported
+explicitly. Each returned body is capped at 1 MiB; responses with a declared
+Content-Length above that limit are skipped. Without a usable Content-Length,
+Playwright reads the complete response before the returned data is truncated.
+Detail reads time out after five seconds per field. WebSocket frames are not captured.
+
+The same operations are available in Code Mode without inference calls:
+
+```js
+const { requests } = await browser.listNetworkRequests({ resource_types: ["fetch", "xhr"] });
+const details = [];
+for (const request of requests) {
+  details.push(await browser.getNetworkRequest({ id: request.id }));
+}
+return details;
+```
+
+Reconnect/restart the MCP server after updating to discover the new tools.
+
 ### Monitor Laya resources
 
 On Linux, with the Laya server running, launch a dashboard that graphs only the server process (CPU and resident RAM), sampled every second:
@@ -284,19 +455,86 @@ From a source checkout the server reads `TYPESAFE_API_KEY` (or `OPENROUTER_API_K
 
 | tool | purpose |
 |---|---|
-| `browser_open(url, viewport?)` | navigate and wait; viewport object fixes resolution, null follows window size |
+| `browser_open(url, viewport?, record_video?)` | navigate and wait; optionally configure viewport and session video recording |
 | `browser_do(goal, values?, max_actions?, allow_irreversible?, explain?)` | work toward one outcome; returns a status |
-| `browser_run(steps, url?, viewport?)` | run an ordered plan locally; return only on completion or the first problem |
+| `browser_run(steps, url?, viewport?, record_video?)` | run an ordered plan locally; return only on completion or the first problem |
 | `browser_execute(code, values?, ...)` | compose browser operations in isolated JavaScript; works with Laya and Jev |
-| `browser_check(question)` | yes/no about the page → `p_yes` |
-| `browser_choose(question, options)` | pick among given options → distribution |
+| `browser_check(question, visual?)` | yes/no → `p_yes`; Jev can detect visual questions automatically |
+| `browser_choose(question, options, visual?)` | pick among given options; `visual: true` uses a screenshot with Jev |
+| `browser_box(target)` | Jev only: find a unique visible target using a screenshot; returns edges, confidence and `box_id` |
+| `browser_act_box(box_id, goal, action?, value?, allow_irreversible?)` | Jev only: act on a fresh, single-use visual target |
 | `browser_snapshot(diff?, interactive?, filter?, urls?, max_chars?)` | compact numbered element list, for taking over; the options below narrow it |
 | `browser_act(action, element, value?, key?, destination?, accept_dialog?)` | act on an element directly, no model; confirm/prompt dialogs are dismissed unless `accept_dialog`. `scroll` moves the page's main scrollable area (or the box around `element`) by most of a screen, `value: "up"` goes back, and the reply says how far it `scrolled` |
 | `browser_read(question, max_chars?)` | the page text that helps answer a question; Jev drops the rest |
 | `browser_screenshot(full_page?)` | PNG image |
-| `browser_close()` | end the session |
+| `browser_videos()` | list session WebM recordings, status and local paths |
+| `browser_stop_recording()` | save videos while keeping the browser and all tabs open |
+| `browser_start_recording()` | record new segments in the configured directory |
+| `browser_close()` | end the session and finalize recorded videos |
 | `browser_webmcp_tools()` | list the [WebMCP](https://github.com/webmachinelearning/webmcp) tools the page registered |
 | `browser_webmcp_call(name, arguments?)` | run one of the page's WebMCP tools; no clicking, no Jev call |
+
+### Jev screenshot validation and Box targets
+
+With `JEV_BACKEND=jev`, `browser_do` can request a viewport screenshot when Jev
+needs visual evidence, cannot find a DOM target, has low target confidence, or an
+action failed. It re-evaluates the goal and can select a **Box** instead of a DOM
+element. `browser_run` and Code Mode's `browser.do` use the same fallback.
+
+For explicit visual questions use `browser_check({question, visual:true})` or
+`browser_choose({question, options, visual:true})`. `browser_check` also asks Jev
+whether pixels are needed and captures them automatically when necessary.
+
+For explicit targeting, call `browser_box({target:"the blue play icon"})`, then
+`browser_act_box({box_id:"<returned ID>",goal:"Start playback",action:"click"})`.
+Actions supported: `click` (default), `hover`, `right_click`, `type` (replace text,
+requires `value`), and `press_enter`. To choose a dropdown value, click its visual
+control and continue the goal with the newly shown options.
+
+The same operations are available in **Code Mode**:
+
+```js
+const check = await browser.check({question: "Is the chart green?", visual: true});
+const target = await browser.box({target: "the blue play icon"});
+await browser.actBox({box_id: target.box_id, goal: "Start playback"});
+return {p_green: check.p_yes};
+```
+
+Box returns normalized `left/right/top/bottom` edges and a center in CSS pixels.
+An absent/ambiguous target, malformed box, or low-confidence box cannot be used to
+act. By default the minimum presence is `0.85` and the minimum Box confidence is
+`0.60`. Configure **only image/Box selection** in `.env` or the MCP process environment:
+
+```dotenv
+JEV_IMAGE_MIN_PRESENCE=0.70
+JEV_IMAGE_MIN_CONFIDENCE=0.70
+```
+
+The first controls `p_visible` (the presence gate); the second controls the Box
+answer's `confidence`. Values must be finite numbers from `0` to `1`, inclusive;
+equality passes the threshold. Environment variables override `.env`. These settings
+apply to explicit Box calls and automatic Box fallback, including Code Mode, and
+do not change DOM selection, goal completion, visual check probabilities, or
+irreversible-action authorization thresholds. Box results report the effective
+`thresholds`. Restart the MCP after changing its process environment or updating
+the source. Code Mode suspends on `not_found` or `ambiguous`.
+IDs are single-use and invalidated by navigation, tab changes, or changed pixels,
+scroll position or viewport. Locate again if the page changed. Visual actions
+retain irreversible-action guards; Code Mode requires the exact `goal` in the
+host's `authorized_goals` for an irreversible action.
+
+Images are resized/padded to TypeSafe's 280–1568 pixel limits without changing the
+browser viewport. CSS coordinate mapping accounts for padding and device pixel
+ratio. Requests send image assets and `TypeSafe-Danger-Zone-Images: true`.
+Visual calls use `jev-preview` when the configured model is `jev-latest` (including
+the OpenRouter prefix); explicitly pinned models are preserved and must support
+Jev 1.14+. These features are unavailable with `JEV_BACKEND=laya`; the Box tools
+are not registered there and visual Code Mode calls fail before inference.
+
+Screenshots used for decisions are sent to the Jev provider, including when the
+fallback is automatic. Password fields and known secret text/input values are
+masked before capture; other visible sensitive content can still be present.
+See [TypeSafe Box](https://docs.typesafe.ai/primitives/box) and [PRIVACY.md](PRIVACY.md).
 
 ### WebMCP: when the page offers its own tools
 
@@ -649,7 +887,9 @@ OpenRouter (`openrouter.ai`) when you use an OpenRouter key, using your key:
   shows back (in its text or a WebMCP tool's result).
 
 Playwright types the real values locally. TypeSafe's (and OpenRouter's) handling of this data
-is covered by their own terms. Screenshots and snapshots go only to your MCP client. See [PRIVACY.md](PRIVACY.md).
+is covered by their own terms. Jev visual validation and Box fallback also send
+masked viewport screenshots to the decision provider. `browser_screenshot` returns
+its image to the MCP client; it does not itself invoke Jev. See [PRIVACY.md](PRIVACY.md).
 
 ## License
 

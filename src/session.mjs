@@ -11,7 +11,11 @@
 // an option to select, or a stricter "is it done" when the answers disagree.
 import { chromium } from "playwright";
 import { DownloadManager, defaultDownloadsDir } from "./downloads.mjs";
-import { jev } from "./jev.mjs";
+import { NetworkLog } from "./network.mjs";
+import { VideoManager } from "./videos.mjs";
+import { jev, BACKEND } from "./jev.mjs";
+import { randomUUID } from "node:crypto";
+import { BOX_ACTIONS, prepareImage, boxPoint, boxQuestions, validBox, imageThresholds } from "./vision.mjs";
 import { ENUMERATE, TRACK_INTERACTIONS, EXTRACT_BLOCKS } from "./page-script.mjs";
 import { LocatorCache, cacheKey } from "./locator-cache.mjs";
 import { FIELDISH, SELECTISH, FILEISH, brief, pickCloser, pageDiff, repeatedElements, formatPage, formatDiff, redactPage, redactValues, SECRET_KEY, REDACTED } from "./page-model.mjs";
@@ -52,7 +56,7 @@ const GUARDED = new Set(["click", "press_enter", "press_key"]);
 const guarded = act => GUARDED.has(act.tool) || (act.tool === "webmcp" && !act.readOnly);
 const ARG_SKIP = "(leave out)";
 const MAX_INLINE_ARGS = 24;   // argument questions carried in the decide() request
-const actLabel = act => act.tool === "webmcp" ? `tool ${act.webmcp}` : brief(act.el);
+const actLabel = act => act.boxId ? `box ${act.boxId}` : act.tool === "webmcp" ? `tool ${act.webmcp}` : brief(act.el);
 // In-page helpers for scroll(). A box scrolls if its overflow allows it and its content is taller.
 const SCROLL_BOX_MAIN = () => {
   const scrolls = el => /(auto|scroll|overlay)/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight + 1;
@@ -125,39 +129,54 @@ export class JevBrowser {
   // userDataDir -> persistent profile (logins survive restarts); browser -> share one Chromium.
   // highlight -> outline each target with Jev's decision before acting (for watching a headed run).
   // use -> an installed browser channel or executable path (default JEV_BROWSER).
-  static async launch({ headed = false, slowMo = 0, viewport = { width: 1280, height: 800 }, storageState, browser, userDataDir, highlight = false, downloadsDir = defaultDownloadsDir(), use = process.env.JEV_BROWSER } = {}) {
+  static async launch({ headed = false, slowMo = 0, viewport = { width: 1280, height: 800 }, storageState, browser, userDataDir, highlight = false, downloadsDir = defaultDownloadsDir(), recordVideo, use = process.env.JEV_BROWSER } = {}) {
     let context, own = false, downloads;
+    const videos = new VideoManager(recordVideo);
     const custom = browserOptions(use), opts = { headless: !headed, slowMo, ...custom };
     try {
     downloads = new DownloadManager(downloadsDir);
     await downloads.initialize();
+    await videos.initialize();
+    const permissions = ["camera", "microphone", "notifications"];
     if (userDataDir) {
-      context = await chromium.launchPersistentContext(userDataDir, { ...opts, viewport, acceptDownloads: true });
+      context = await chromium.launchPersistentContext(userDataDir, { ...opts, viewport, permissions, acceptDownloads: true });
     } else {
       own = !browser;
       browser ??= await chromium.launch(opts);
-      context = await browser.newContext({ viewport, storageState, acceptDownloads: true });
+      context = await browser.newContext({ viewport, storageState, permissions, acceptDownloads: true });
     }
     } catch (e) {
+      if (own) await browser?.close().catch(() => {});
       const msg = String(e.message);
-      if (Object.keys(custom).length && /is not found|ENOENT|Executable doesn't exist/i.test(msg)) throw new Error(`Browser "${use}" (JEV_BROWSER) was not found. Install it, or set JEV_BROWSER to a Chromium-based browser's executable path, or unset it to use Playwright's Chromium.`);
-      if (/Executable doesn't exist|browserType\.launch/i.test(msg) && /install/i.test(msg)) throw new Error("Chromium for Playwright is not installed. Run: npx playwright install chromium");
+      if (Object.keys(custom).length && /is not found|ENOENT|Executable doesn't exist/i.test(msg)) throw new Error(`Browser "${use}" (JEV_BROWSER) was not found. Install it, or set JEV_BROWSER to a Chromium-based browser's executable path, or unset it to use Playwright's Chromium.`, { cause: e });
+      if (/Executable doesn't exist|browserType\.launch/i.test(msg) && /install/i.test(msg)) throw new Error("Chromium for Playwright is not installed. Run: npx playwright install chromium", { cause: e });
       throw e;
     }
     await context.addInitScript(TRACK_INTERACTIONS);
     const b = new JevBrowser(browser, context, own);
     b.downloads = downloads;
+    b.videos = videos;
     b.highlight = highlight;
     b.page = context.pages()[0] ?? await context.newPage();
-    for (const p of context.pages()) downloads.attach(p);
+    for (const p of context.pages()) { downloads.attach(p); videos.attach(p); }
+    await videos.ready();
+    if (videos.directory && !videos.items.some(item => item.status === "recording")) {
+      await context.close().catch(() => {});
+      if (own) await browser?.close().catch(() => {});
+      throw new Error(videos.items.find(item => item.error)?.error ?? `Video recording failed to start for "${videos.directory}". No recording was created for the initial page.`);
+    }
     await b.page.evaluate(TRACK_INTERACTIONS);
     return b;
   }
 
   constructor(browser, context, ownBrowser) {
     this.browser = browser; this.context = context; this.ownBrowser = ownBrowser;
+    this.network = new NetworkLog(context);
     this.inflight = new Map(); this.events = []; this.frames = new Map(); this.lastPage = null;
     this.shown = null;               // the page whose element numbers the caller last saw
+    this.tabIds = new WeakMap(); this.nextTabId = 1;
+    this.trackedTabs = new WeakSet();
+    for (const p of context.pages()) this.trackTab(p);
     this.dialogPolicy = SAFE_DIALOGS;
     this.stats = { calls: 0, jev_ms: 0, tokens: 0 };
     // Persisted decisions: replay cached actions without calling Jev (JEV_CACHE=0 disables)
@@ -174,6 +193,7 @@ export class JevBrowser {
     const untrack = r => this.inflight.delete(r);
     context.on("request", track); context.on("requestfinished", untrack); context.on("requestfailed", untrack);
     context.on("page", p => this.downloads?.attach(p));
+    context.on("page", p => this.videos?.attach(p));
     context.on("page", p => {
       if (this.viewport) this.resize(p).catch(() => {});
       if (this._page && p !== this._page) { this.events.push(`new tab opened: ${p.url()}`); this.page = p; }
@@ -182,14 +202,64 @@ export class JevBrowser {
 
   get page() { return this._page; }
   set page(p) {
+    if (this._page && this._page !== p) {
+      this.shown = null; this.lastPage = null; this.diffBase = null;
+      this.visualTargets?.clear();
+      this.frames.clear(); this.needsTabSnapshot = true;
+    }
     this._page = p;
+    this.trackTab(p);
+  }
+
+  trackTab(p) {
+    if (!this.tabIds.has(p)) this.tabIds.set(p, `tab-${this.nextTabId++}`);
+    if (this.trackedTabs.has(p)) return;
+    this.trackedTabs.add(p);
     p.on("dialog", async d => {
       // confirm/prompt dialogs are often the site's own "are you sure?" before deleting or paying
       const accept = await Promise.resolve(this.dialogPolicy(d)).catch(() => false);
       this.events.push(`${d.type()} dialog "${d.message().slice(0, 100)}" ${accept ? "accepted" : "dismissed"}`);
       await (accept ? d.accept(this.promptText ?? undefined) : d.dismiss()).catch(() => {});
     });
-    p.on("close", () => { if (this._page === p) { const rest = this.context.pages(); if (rest.length) { this._page = rest.at(-1); this.events.push("tab closed; switched to previous tab"); } } });
+    p.on("framenavigated", () => { this.visualTargets?.clear(); });
+    p.on("close", () => { if (this._page === p) { const rest = this.context.pages().filter(p => !p.isClosed()); if (rest.length) { this.page = rest.at(-1); this.events.push("tab closed; switched to previous tab"); } } });
+  }
+
+  async listTabs() {
+    this.assertExecution();
+    const pages = this.context.pages().filter(p => !p.isClosed());
+    const tabs = await Promise.all(pages.map(async p => {
+      this.trackTab(p);
+      return { id: this.tabIds.get(p), url: p.url(), title: await p.title().catch(() => ""), active: p === this.page };
+    }));
+    return { tabs: tabs.filter((_, i) => !pages[i].isClosed()) };
+  }
+
+  async newTab({ url = "about:blank" } = {}) {
+    this.assertExecution();
+    if (typeof url !== "string" || !url.trim()) throw new Error("Provide a non-empty URL for the new tab");
+    const p = await this.context.newPage();
+    await p.bringToFront();
+    this.page = p;
+    await this.open(url);
+    return { status: "done", id: this.tabIds.get(p), url: p.url(), title: await p.title(), active: p === this.page };
+  }
+
+  async selectTab({ id, url, title }) {
+    this.assertExecution();
+    if ([id, url, title].filter(v => v !== undefined).length !== 1 ||
+        [id, url, title].some(v => v !== undefined && (typeof v !== "string" || !v.trim()))) {
+      throw new Error("Provide exactly one non-empty tab selector: id, url or title");
+    }
+    const { tabs } = await this.listTabs();
+    const matches = tabs.filter(t => id !== undefined ? t.id === id : url !== undefined ? t.url === url : t.title === title);
+    if (!matches.length) throw new Error("No open tab matches the selector; list tabs again");
+    if (matches.length > 1) throw new Error("Multiple tabs match the selector; select by id from listTabs");
+    const p = this.context.pages().find(p => this.tabIds.get(p) === matches[0].id && !p.isClosed());
+    if (!p) throw new Error("Tab was closed; list tabs again");
+    await p.bringToFront();
+    this.page = p;
+    return { status: "done", ...matches[0], active: true };
   }
 
   // Quiet = no fetch/xhr/document request in flight (ignoring ones older than 5s, e.g. long-poll)
@@ -256,7 +326,10 @@ export class JevBrowser {
           f.evaluate(ENUMERATE, { start, frame: n || undefined }),
           new Promise((_, rej) => { timer = setTimeout(() => rej(new Error("frame evaluate timed out")), 5000); }),
         ]);
-      } catch { continue; } finally { clearTimeout(timer); }
+      } catch (error) {
+        if (n === 0) throw new Error("Could not inspect the main page for a browser snapshot", { cause: error });
+        continue;
+      } finally { clearTimeout(timer); }
       if (n === 0) base = r;
       else if (!r.elements.length) continue;
       for (const e of r.elements) this.frames.set(e.i, f);
@@ -282,19 +355,20 @@ export class JevBrowser {
     const d = diff && prev ? pageDiff(redactPage(prev), redactPage(page)) : null;
     if (!d) {
       this.shown = page;
+      this.needsTabSnapshot = false;
       return `${diff ? "(no previous snapshot to diff against; showing the full page)\n" : ""}${formatPage(page, render)}`;
     }
     this.diffBase = { over: this.shown, page };
     return formatDiff(page, d, render);
   }
 
-  async call(state, questions) {
+  async call(state, questions, options = {}) {
     this.assertExecution();
     if (this.execution && this.execution.remainingCalls-- <= 0) {
       this.execution.error = Object.assign(new Error("Decision call budget exhausted"), { status: "limit_exceeded" });
       throw this.execution.error;
     }
-    const r = await this.ask(this.redact(state), questions, { signal: this.execution?.signal });
+    const r = await this.ask(this.redact(state), questions, { ...options, signal: this.execution?.signal });
     this.stats.calls++; this.stats.jev_ms += r.ms; this.stats.tokens += r.tokens;
     return r;
   }
@@ -317,20 +391,112 @@ export class JevBrowser {
   }
 
   // Yes/no question about the current page -> probability.
-  async check(question) {
+  async check(question, { visual = false } = {}) {
+    if (visual) this.requireVision();
     await this.settle();
     const page = await this.snapshot();
-    const { answers } = await this.call({ page }, { q: { type: "noul", instructions: `Answer about \`page\`: ${question}` } });
+    let image = visual ? await this.captureVision() : null;
+    let { answers } = await this.call({ page, ...(image ? { screenshot: image.ref } : {}) }, {
+      q: { type: "noul", instructions: `Answer about \`page\`${image ? " and the visible pixels in `screenshot`" : ""}: ${question}` },
+      ...(!visual && BACKEND === "jev" ? { needs_visual: { type: "noul", instructions: `Does answering this question require seeing pixels, layout, colors, images or content missing from \`page\`? Question: ${question}` } } : {}),
+    }, image ? { assets: image.assets } : {});
+    if (!image && answers.needs_visual?.noul >= 0.5) {
+      image = await this.captureVision();
+      ({ answers } = await this.call({ page, screenshot: image.ref }, { q: { type: "noul", instructions: `Answer from the visible pixels in \`screenshot\` and \`page\`: ${question}` } }, { assets: image.assets }));
+    }
     return answers.q.noul;
   }
 
   // Pick one of `options` (array, or name -> description) about the current page.
-  async choose(question, options) {
+  async choose(question, options, { visual = false } = {}) {
+    if (visual) this.requireVision();
     await this.settle();
     const page = await this.snapshot();
     const criteria = Array.isArray(options) ? Object.fromEntries(options.map(o => [o, null])) : options;
-    const { answers } = await this.call({ page }, { q: { type: "choice", instructions: `Answer about \`page\`: ${question}`, criteria } });
+    const image = visual ? await this.captureVision() : null;
+    const { answers } = await this.call({ page, ...(image ? { screenshot: image.ref } : {}) }, { q: { type: "choice", instructions: `Answer about \`page\`${image ? " and `screenshot`" : ""}: ${question}`, criteria } }, image ? { assets: image.assets } : {});
     return { choice: answers.q.choice, probabilities: answers.q.probabilities, confidence: answers.q.confidence };
+  }
+
+  requireVision() {
+    if (BACKEND !== "jev") throw new Error("Screenshot validation and box selection are available only with the Jev backend");
+  }
+
+  async captureVision() {
+    this.requireVision(); this.assertExecution();
+    const page = this.page;
+    const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, scrollX, scrollY }));
+    const mask = [];
+    for (const frame of page.frames()) {
+      mask.push(frame.locator('input[type="password"], [autocomplete="current-password"], [autocomplete="new-password"]'));
+      for (const secret of this.secrets ?? []) mask.push(frame.getByText(secret, { exact: false }));
+      if (this.secrets?.size) {
+        const inputs = frame.locator("input, textarea");
+        const indices = await inputs.evaluateAll((els, secrets) => els.flatMap((el, i) => secrets.some(s => el.value.includes(s)) ? [i] : []), [...this.secrets]);
+        for (const i of indices) mask.push(inputs.nth(i));
+      }
+    }
+    const buffer = await page.screenshot({ fullPage: false, scale: "css", animations: "disabled", caret: "hide", mask });
+    this.assertExecution();
+    if (page !== this.page) throw new Error("Active tab changed while capturing screenshot");
+    const image = await prepareImage(buffer, viewport);
+    this.assertExecution();
+    return { ...image, page, url: page.url() };
+  }
+
+  rememberBox(answer, visible, image, target) {
+    const thresholds = imageThresholds();
+    if (!Number.isFinite(visible) || visible < thresholds.presence) return { status: "not_found", p_visible: visible ?? 0, thresholds, info: "No unique visible target; box ignored" };
+    if (!validBox(answer?.box) || !Number.isFinite(answer?.confidence) || answer.confidence < thresholds.confidence) return { status: "ambiguous", p_visible: visible, confidence: answer?.confidence ?? 0, thresholds, info: "Invalid or low-confidence box; no action taken" };
+    let point;
+    try { point = boxPoint(answer.box, image); }
+    catch { return { status: "ambiguous", p_visible: visible, confidence: answer.confidence, info: "Box center is outside the screenshot content" }; }
+    const id = randomUUID();
+    this.visualTargets ??= new Map();
+    if (this.visualTargets.size >= 20) this.visualTargets.delete(this.visualTargets.keys().next().value);
+    // Keep only a fingerprint and geometry, never retain base64 screenshots in session state.
+    const { assets, ...frame } = image;
+    this.visualTargets.set(id, { ...frame, box: answer.box, point, target });
+    return { status: "done", box_id: id, box: answer.box, point, confidence: answer.confidence, p_visible: visible, thresholds };
+  }
+
+  async box(target) {
+    this.requireVision(); await this.settle();
+    const image = await this.captureVision();
+    const { answers } = await this.call({ screenshot: image.ref, target }, boxQuestions("`target`"), { assets: image.assets });
+    return this.rememberBox(answers.box, answers.visible?.noul, image, target);
+  }
+
+  async freshBox(id) {
+    this.requireVision();
+    const saved = this.visualTargets?.get(id);
+    if (!saved || saved.page !== this.page || saved.url !== this.page.url()) throw new Error("Box is stale or unknown; locate it again with browser_box");
+    const image = await this.captureVision();
+    if (image.hash !== saved.hash || JSON.stringify(image.viewport) !== JSON.stringify(saved.viewport)) {
+      this.visualTargets.delete(id);
+      throw new Error("Screenshot changed since box selection; locate it again with browser_box");
+    }
+    return { ...saved, image };
+  }
+
+  // Explicit visual action also uses the same irreversible policy as do(), including Code Mode.
+  async actBox({ box_id, action = "click", goal, value, allowIrreversible = false }) {
+    if (!BOX_ACTIONS.includes(action)) throw new Error(`Box does not support ${action}`);
+    if (!goal?.trim()) throw new Error("A visual action requires a goal");
+    if (action === "type" && value == null) throw new Error("no value to type");
+    const target = await this.freshBox(box_id);
+    const { image } = target;
+    const { answers } = await this.call({ screenshot: image.ref, task: { goal, action, target: target.target, box: target.box } }, {
+      irreversible: { type: "noul", instructions: "Would `task.action` on `task.target` in `screenshot` have a hard-to-undo effect such as paying, sending, deleting or publishing?" },
+    }, { assets: image.assets });
+    if (!allowIrreversible && !(answers.irreversible?.noul < 0.6)) return { status: "needs_confirmation", goal, box_id, info: "Visual action needs authorization for this exact goal" };
+    this.dialogPolicy = allowIrreversible ? ACCEPT_DIALOGS : this.dialogGuard(goal, 0.6);
+    this.heldDialog = null;
+    try {
+      const ms = await this.act({ tool: action, boxId: box_id, value });
+      await this.settle();
+      return { status: this.heldDialog ? "needs_confirmation" : "done", goal, box_id, action, ms, url: this.page.url() };
+    } finally { this.dialogPolicy = SAFE_DIALOGS; }
   }
 
   // The whole document's readable text, cut at structural boundaries, main frame first.
@@ -348,7 +514,10 @@ export class JevBrowser {
           f.evaluate(EXTRACT_BLOCKS, { maxBlock, maxChars, frame: n || undefined }),
           new Promise((_, rej) => { timer = setTimeout(() => rej(new Error("frame evaluate timed out")), 5000); }),
         ]);
-      } catch { continue; } finally { clearTimeout(timer); }
+      } catch (error) {
+        if (n === 0) throw new Error("Could not read the main page content", { cause: error });
+        continue;
+      } finally { clearTimeout(timer); }
       if (n === 0) base = r;
       blocks.push(...r.blocks);
       truncated ||= r.truncated;
@@ -399,7 +568,7 @@ export class JevBrowser {
     });
   }
 
-  async decide(page, goal, values, history, lastChange, webmcp = []) {
+  async decide(page, goal, values, history, lastChange, webmcp = [], image = null) {
     values = redactValues(values);   // what Jev sees; resolve() types the real value
     if (webmcp.length) page = { ...page, webmcp_tools: webmcp.map(t => ({ name: t.name, description: t.description.slice(0, 300), arguments: Object.keys(t.inputSchema?.properties ?? {}) })) };
     const task = { goal, ...(Object.keys(values).length ? { values } : {}), history, ...(lastChange ? { last_change: lastChange } : {}) };
@@ -413,6 +582,16 @@ export class JevBrowser {
       irreversible: { type: "noul", instructions: "Would the next action toward `task.goal` on `page` have an effect outside this browser that is hard to undo, such as placing an order, paying, sending a message, deleting data or publishing?" },
       tool: { type: "choice", instructions: "What is the next action toward `task.goal` on `page`, given what `task.history` already did?", criteria: webmcp.length ? { ...TOOLS, webmcp: WEBMCP_ACTION } : TOOLS },
     };
+    if (BACKEND === "jev" && !image) common.needs_visual = { type: "noul", instructions: "Does `task.goal` require visual validation (pixels, color, images, layout), or is the next target missing from `page.elements`, so a screenshot is needed?" };
+    if (image) {
+      page = { ...page, screenshot: image.ref };
+      for (const q of Object.values(common)) q.instructions += " Also use the visible pixels in `page.screenshot`.";
+      Object.assign(common, {
+        visual_target: { type: "choice", instructions: "Should the next action use a numbered DOM element or a screenshot box? Use box only for click/type/press_enter/hover/right_click when the DOM target is missing or unsuitable.", criteria: { dom: "A numbered page element", box: "A visual target missing or unsuitable in the DOM" } },
+        ...Object.fromEntries(Object.entries(boxQuestions("the target for the NEXT action toward `task.goal` (not the entire goal)")).map(([k, v]) => [k, { ...v, instructions: v.instructions.replaceAll("`screenshot`", "`page.screenshot`") }])),
+      });
+    }
+    const call = (state, questions) => this.call(state, questions, image ? { assets: image.assets } : {});
     let argKeys;
     if (webmcp.length) {
       common.use_tool = { type: "noul", instructions: "Can one of `page.webmcp_tools` (the page's own tools for agents) do the next step toward `task.goal`, given what `task.history` already did? A tool call replaces typing into fields and pressing buttons for that step." };
@@ -428,7 +607,7 @@ export class JevBrowser {
 
     if (page.elements.length <= MAX_SINGLE && JSON.stringify(page).length <= MAX_STATE_CHARS) {
       targetQ.criteria = Object.fromEntries(page.elements.map(e => [String(e.i), null]));
-      const r = await this.call({ page, task }, { ...common, ...(page.elements.length ? { target: targetQ } : {}) });
+      const r = await call({ page, task }, { ...common, ...(page.elements.length ? { target: targetQ } : {}) });
       return { ...r.answers, stages: 1, argKeys };
     }
     // Two stages: groups of consecutive elements, then elements in the likeliest groups.
@@ -437,8 +616,8 @@ export class JevBrowser {
       const els = page.elements.slice(k, k + GROUP);
       groups.push({ g: groups.length, summary: els.map(e => (e.label || e.text || e.placeholder || e.href || e.tag).slice(0, 24)).join(" | ").slice(0, 700) });
     }
-    const lite = { url: page.url, title: page.title, text: page.text, metrics: page.metrics, dialogs: page.dialogs, groups, ...(page.webmcp_tools ? { webmcp_tools: page.webmcp_tools } : {}) };
-    const r1 = await this.call({ page: lite, task }, {
+    const lite = { url: page.url, title: page.title, text: page.text, metrics: page.metrics, dialogs: page.dialogs, groups, ...(image ? { screenshot: image.ref } : {}), ...(page.webmcp_tools ? { webmcp_tools: page.webmcp_tools } : {}) };
+    const r1 = await call({ page: lite, task }, {
       ...common,
       group: { type: "choice", instructions: "Which entry of `page.groups` (by its `g`) contains the element the next action toward `task.goal` should act on? Each group summarises consecutive page elements.", criteria: Object.fromEntries(groups.map(g => [String(g.g), null])) },
     });
@@ -550,6 +729,22 @@ export class JevBrowser {
       throw this.execution.error;
     }
     const t = Date.now();
+    if (act.boxId) {
+      if (!BOX_ACTIONS.includes(act.tool)) throw new Error(`Box does not support ${act.tool}`);
+      if (act.tool === "type" && act.value == null) throw new Error("no value to type");
+      const { point } = await this.freshBox(act.boxId);
+      this.visualTargets.delete(act.boxId);
+      if (act.tool === "hover") await this.page.mouse.move(point.x, point.y);
+      else {
+        await this.page.mouse.click(point.x, point.y, act.tool === "right_click" ? { button: "right" } : {});
+        this.assertExecution();
+        if (act.tool === "type") {
+          await this.page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+          await this.page.keyboard.insertText(String(act.value));
+        } else if (act.tool === "press_enter") await this.page.keyboard.press("Enter");
+      }
+      return Date.now() - t;
+    }
     const needs = TARGETED.has(act.tool) || (act.tool === "press_key" && act.target != null);
     const loc = needs ? this.locate(act.target) : null;
     if (needs && act.target == null) throw new Error(`${act.tool} needs a target element`);
@@ -646,6 +841,7 @@ export class JevBrowser {
   // it. Map number i from the page shown to the caller onto a fresh snapshot, matching the element
   // by name, surrounding text and frame (the k-th of its look-alikes stays the k-th).
   currentElement(i, cur) {
+    if (this.needsTabSnapshot) throw new Error("the active tab changed; take a new snapshot before acting on element numbers");
     const old = this.shown ?? cur;
     const path = u => { try { const x = new URL(u); return x.origin + x.pathname; } catch { return u; } };
     if (path(old.url) !== path(cur.url)) throw new Error(`the page changed since element ${i} was listed (${old.url} -> ${cur.url}); take a new snapshot`);
@@ -756,15 +952,27 @@ export class JevBrowser {
       }
 
       const webmcp = await this.webmcpTools();
-      const a = await this.decide(page, goal, values, history.slice(-12), round ? pageDiff(redactPage(prevPage), redactPage(page)) : undefined, webmcp);
+      const change = round ? pageDiff(redactPage(prevPage), redactPage(page)) : undefined;
+      let a = await this.decide(page, goal, values, history.slice(-12), change, webmcp);
+      let act = this.resolve(page, a, values, webmcp), image;
+      if (BACKEND === "jev" && (a.needs_visual?.noul >= 0.5 ||
+          (Math.max(a.done.noul, a.done_change?.noul ?? 0) < doneAt && (act.tool === "none" || (TARGETED.has(act.tool) && (!act.el || act.p_target < minTarget)) || history.at(-1)?.error)))) {
+        image = await this.captureVision();
+        a = await this.decide(page, goal, values, history.slice(-12), change, webmcp, image);
+        act = this.resolve(page, a, values, webmcp);
+        if (act.tool !== "webmcp" && a.visual_target?.choice === "box" && BOX_ACTIONS.includes(a.tool.choice)) {
+          const found = this.rememberBox(a.box, a.visible?.noul, image, goal);
+          act = { ...act, tool: a.tool.choice === "type" && act.value == null ? "click" : a.tool.choice, target: null, el: undefined, boxId: found.box_id, p_target: found.status === "done" ? found.confidence : 0, candidates: [] };
+        }
+      }
       prevPage = page;
-      const act = this.resolve(page, a, values, webmcp);
       const done = Math.max(a.done.noul, a.done_change?.noul ?? 0);
       const r = {
         round, done: +done.toFixed(2), done_plain: +a.done.noul.toFixed(2), done_change: +(a.done_change?.noul ?? 0).toFixed(2),
         blocked: +a.blocked.noul.toFixed(2), error_shown: +a.error.noul.toFixed(2), login: +a.login.noul.toFixed(2), irreversible: +a.irreversible.noul.toFixed(2),
         tool: act.tool, p_tool: +act.p_tool.toFixed(2), target: act.target, p_target: +act.p_target.toFixed(2), el: actLabel(act),
         value: act.valueKey, elements: page.elements.length, stages: a.stages, candidates: act.candidates,
+        ...(image ? { visual: true, ...(act.boxId ? { box: a.box.box, box_id: act.boxId } : {}) } : {}),
       };
       rounds.push(r);
       log(`  r${round}: ${act.tool}(${r.p_tool}) -> ${act.target != null ? `#${act.target} ` : ""}${r.el} (${r.p_target})${act.valueKey ? ` value=${act.valueKey}` : ""}  done=${r.done} err=${r.error_shown} login=${r.login} irrev=${r.irreversible}${a.use_tool ? ` use_tool=${a.use_tool.noul.toFixed(2)}` : ""}  [${page.elements.length} els${a.stages === 2 ? ", 2-stage" : ""}]`);
@@ -772,7 +980,7 @@ export class JevBrowser {
       if (round > 0 ? done >= doneAt && done < 0.85 && act.tool !== "none" : done >= 0.9) {
         // "done" and "next action" disagree: settle it with a stricter single question. In round 0
         // nothing has been done yet, so any "done" is checked (labels like a "Done" button mislead it).
-        const c = await this.call({ page, task: { goal, history: history.slice(-12) } }, { complete: { type: "noul", instructions: "Is everything `task.goal` asks for already finished on `page`, so that no further action (such as pressing a submit, search or continue button) is needed?" } });
+        const c = await this.call({ page, task: { goal, history: history.slice(-12) }, ...(image ? { screenshot: image.ref } : {}) }, { complete: { type: "noul", instructions: "Is everything `task.goal` asks for already finished on `page`, so that no further action (such as pressing a submit, search or continue button) is needed?" + (image ? " Also judge the visible pixels in `screenshot`." : "") } }, image ? { assets: image.assets } : {});
         r.confirm = +c.answers.complete.noul.toFixed(2);
         log(`     confirm=${r.confirm}`);
         if (r.confirm >= 0.65) { status = "done"; break; }
@@ -894,6 +1102,7 @@ export class JevBrowser {
       }
     }
     this.shown = page;
+    this.needsTabSnapshot = false;
     if (this.events.length) history.push(...this.events.splice(0).map(e => ({ event: e })));
     const out = { status, goal, url: this.page.url(), title: await this.page.title().catch(() => ""), actions: history, rounds, jev_calls: this.stats.calls - calls0, ms: Date.now() - t0 };
     if (cacheHits || cacheSaved) out.cache = { hits: cacheHits, saved: cacheSaved };
@@ -942,10 +1151,20 @@ export class JevBrowser {
   }
 
   async screenshot({ path, fullPage = false } = {}) { return this.page.screenshot({ path, fullPage }); }
+  async stopRecording() {
+    this.assertExecution();
+    return this.videos.stop();
+  }
+  async startRecording() {
+    this.assertExecution();
+    return this.videos.start(this.context);
+  }
   async close() {
     const pending = await this.downloads?.drain();
+    const videos = await this.videos?.stop();
+    this.network.close();
     await this.context.close().catch(() => {});
     if (this.ownBrowser) await this.browser.close().catch(() => {});
-    return { pending_downloads: pending ?? [] };
+    return { pending_downloads: pending ?? [], ...videos };
   }
 }
