@@ -45,6 +45,109 @@ Con Laya estas herramientas no se registran y las llamadas visuales desde Code
 Mode se rechazan antes de consultar al modelo. Consulta los ejemplos completos en
 [README.md](README.md#jev-screenshot-validation-and-box-targets).
 
+## Android nativo con Appium (experimental)
+
+Usa el mismo MCP Node del repositorio. Para cargar los esquemas nuevos, reinicia
+su conexión en tu cliente MCP después de actualizar el código.
+
+Requisitos: Appium instalado, driver UiAutomator2 instalado y un emulador dedicado
+visible en `adb devices -l`. En otra terminal:
+
+```powershell
+appium --address 127.0.0.1 --port 4723
+```
+
+No requiere un proceso MCP móvil adicional. Para navegar con Jev, configura
+`JEV_BACKEND=jev` y sus credenciales como en web. Con Laya se utiliza su servidor
+local. La navegación nativa con inferencia real se ha probado con Jev.
+
+Primero crea una sesión con dispositivo explícito:
+
+```json
+{
+  "target": {
+    "kind": "android",
+    "appium_url": "http://127.0.0.1:4723",
+    "capabilities": {
+      "platformName": "Android",
+      "appium:automationName": "UiAutomator2",
+      "appium:udid": "emulator-5554",
+      "appium:noReset": true,
+      "appium:forceAppLaunch": true
+    }
+  }
+}
+```
+
+Pasa ese objeto a `browser_create_session` y conserva el `session_id`:
+
+```text
+browser_open({session_id, app:{package:"com.android.settings",activity:".Settings"}})
+browser_snapshot({session_id})
+browser_do({session_id, goal:"Open About phone showing Device name", max_actions:10,
+  verify:{app_package:"com.android.settings",text_includes:"Device name"}})
+browser_close({session_id})
+```
+
+En Code Mode, después de crear la sesión Android, también puedes abrir y navegar:
+
+```js
+return await browser.run({
+  app: { package: "com.android.settings", activity: ".Settings" },
+  steps: [{
+    goal: "Open About phone showing Device name; scroll if necessary",
+    max_actions: 10,
+    verify: {
+      app_package: "com.android.settings",
+      text_includes: "Device name"
+    }
+  }]
+});
+```
+
+`open` exige `url` para web o `app` para Android; `run` permite una de ellas o
+ninguna. Cierra antes de volver a abrir una aplicación dentro de la misma sesión.
+Cada target es inmutable. Los IDs de elementos pertenecen al snapshot mostrado;
+una acción stale exige reobservar. `browser_act` admite `click`, `type`, `clear`,
+`scroll` (value `up`/`down`), `back` y `wait` en Android. Después de actuar, toma un
+nuevo snapshot antes de volver a usar números. `type` reemplaza el contenido y
+comprueba foco antes y después de clear.
+
+Verificaciones adicionales: `activity_includes`, `field:{label,value_key}` y
+`element:{label,state}` con estados `enabled`, `disabled`, `checked`, `unchecked`,
+`selected` o `clickable`. Las verificaciones solo reportan nombres de condiciones
+fallidas, sin valores secretos. Usa claves como `password`/`token` para secretos
+en `values`; nunca incluyas secretos en el texto del objetivo.
+
+### Límites y recuperación
+
+- Android nativo UiAutomator2: sin iOS, WebView, OCR, coordenadas libres ni gestos avanzados.
+- HTML, tabs, red, descargas, vídeo y visión/Box devuelven `unsupported_capability`.
+- Snapshot limitado a 240 elementos y 12000 caracteres de texto; informa truncamiento.
+- El lease por UDID coordina sesiones del mismo proceso MCP, no clientes externos.
+- No hay retries de POST/DELETE. Si se pierde una respuesta, el resultado incluye
+  `outcome: "unknown"`. Inspecciona Appium antes de repetir el objetivo.
+- Si se desconoce el resultado de creación/cierre, el cliente no recrea ni repite
+  el cierre. Un fallo de cleanup conserva el lease; resolverlo puede requerir
+  reiniciar el servidor Appium y el MCP.
+- Desactivar Android: `JEV_MOBILE_ENABLED=0` en el entorno del proceso MCP.
+
+### Pruebas reproducibles
+
+```powershell
+npm run test:android
+$env:JEV_ANDROID_E2E="1"
+$env:JEV_ANDROID_JEV_E2E="1"
+$env:ANDROID_UDID="emulator-5554"
+npm run test:e2e:android
+```
+
+El E2E abre Settings, navega sin cambiar ajustes, escribe/limpia una búsqueda y
+cierra sus sesiones propias. El segundo caso usa Jev por MCP/Code Mode y verifica
+la pantalla independientemente. Sin flags, los E2E se omiten; la suite por defecto
+usa fixtures/mocks. Para reducir contención de Chromium en equipos ocupados:
+`node --test --test-concurrency=2 test/*.test.mjs`.
+
 ## Ejecutar conversaciones en navegadores independientes
 
 El MCP admite varias sesiones dentro del mismo proceso, con Laya y con Jev.

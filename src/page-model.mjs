@@ -119,9 +119,10 @@ const FILTERABLE = ["label", "text", "placeholder", "name", "href"];
 function elementLine(e, urls) {
   const f = [];
   for (const k of ["label", "text", "placeholder", "name"]) if (e[k]) f.push(`${k === "text" ? "" : k + "="}"${e[k]}"`);
-  if (e.value !== undefined && e.value !== "") f.push(`value="${e.value}"`);
+  if (e.value !== undefined && e.value !== null && e.value !== "") f.push(`value="${e.value}"`);
   if (e.options) f.push(`options=[${e.options.slice(0, 8).join(", ")}${e.options.length > 8 ? ", …" : ""}]`);
-  for (const k of ["checked", "disabled", "busy", "expanded", "active", "hidden", "covered"]) if (e[k] !== undefined) f.push(`${k}=${e[k]}`);
+  if (e.actions) f.push(`actions=[${e.actions.join(", ")}]`);
+  for (const k of ["checked", "disabled", "busy", "expanded", "active", "hidden", "covered"]) if (e[k] !== undefined && e[k] !== null) f.push(`${k}=${e[k]}`);
   if (e.sorted) f.push(`sorted=${e.sorted}`);
   // href is the largest share of the output on a link-heavy page and the caller acts on element
   // numbers, not URLs, so it is off unless asked for — except when it is the only thing that
@@ -143,6 +144,7 @@ const capOf = maxChars => maxChars === Infinity ? Infinity : Math.max(0, Math.mi
 export function formatPage(page, { maxElements = 400, interactive = false, filter = "", urls = false, maxChars = MAX_CHARS_DEFAULT } = {}) {
   page = redactPage(page);
   const head = [`url: ${page.url}`, `title: ${page.title}`];
+  if (page.truncated) head.push(`observation truncated: ${JSON.stringify(page.truncation ?? {})}`);
   if (page.dialogs?.length) head.push(`dialogs: ${page.dialogs.join(" || ")}`);
   if (!interactive) head.push(`visible text: ${page.text}`);
 

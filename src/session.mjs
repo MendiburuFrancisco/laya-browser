@@ -10,6 +10,7 @@
 // element). Follow-up requests are made only when needed: a key to press, a drag destination,
 // an option to select, or a stricter "is it done" when the answers disagree.
 import { chromium } from "playwright";
+import { WEB_CAPABILITIES } from "./drivers/contract.mjs";
 import { DownloadManager, defaultDownloadsDir } from "./downloads.mjs";
 import { NetworkLog } from "./network.mjs";
 import { VideoManager } from "./videos.mjs";
@@ -50,7 +51,7 @@ export const TOOLS = {
 export const WEBMCP_ACTION = "Call one of the page's own agent tools in `page.webmcp_tools`. The site provides them for agents and one call does the whole step (no typing into fields, no submit button), so when a tool does what the next step needs, choose this over click or type";
 // `back` is not offered to Jev (it proposed it after successful steps); callers can still use it via act().
 export const KEYS = ["Escape", "Tab", "Space", "Backspace", "Delete", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End"];
-const TARGETED = new Set(["click", "type", "press_enter", "select", "hover", "right_click", "drag", "upload"]);
+const TARGETED = new Set(["click", "type", "clear", "press_enter", "select", "hover", "right_click", "drag", "upload"]);
 const GUARDED = new Set(["click", "press_enter", "press_key"]);
 // a page tool can change anything the page can, unless the site marks it read-only
 const guarded = act => GUARDED.has(act.tool) || (act.tool === "webmcp" && !act.readOnly);
@@ -126,6 +127,7 @@ export function browserOptions(use) {
 }
 
 export class JevBrowser {
+  capabilities() { return WEB_CAPABILITIES; }
   // userDataDir -> persistent profile (logins survive restarts); browser -> share one Chromium.
   // highlight -> outline each target with Jev's decision before acting (for watching a headed run).
   // use -> an installed browser channel or executable path (default JEV_BROWSER).
@@ -751,6 +753,7 @@ export class JevBrowser {
     const o = { timeout: 4000 };
     switch (act.tool) {
       case "click": await loc.click(o); break;
+      case "clear": await loc.fill("", o); break;
       case "right_click": await loc.click({ button: "right", ...o }); break;
       case "type": {
         if (act.value == null) throw new Error("no value to type");
@@ -840,9 +843,9 @@ export class JevBrowser {
   // Element numbers the caller saw can be stale: the page changed, or check()/choose() renumbered
   // it. Map number i from the page shown to the caller onto a fresh snapshot, matching the element
   // by name, surrounding text and frame (the k-th of its look-alikes stays the k-th).
-  currentElement(i, cur) {
+  currentElement(i, cur, previous = this.shown) {
     if (this.needsTabSnapshot) throw new Error("the active tab changed; take a new snapshot before acting on element numbers");
-    const old = this.shown ?? cur;
+    const old = previous ?? cur;
     const path = u => { try { const x = new URL(u); return x.origin + x.pathname; } catch { return u; } };
     if (path(old.url) !== path(cur.url)) throw new Error(`the page changed since element ${i} was listed (${old.url} -> ${cur.url}); take a new snapshot`);
     const was = old.elements.find(e => e.i === i);

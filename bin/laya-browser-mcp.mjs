@@ -23,7 +23,10 @@ import { executeCode, executeShape } from "../src/code-mode.mjs";
 import { BrowserSessions } from "../src/browser-sessions.mjs";
 import { LocatorCache } from "../src/locator-cache.mjs";
 import { errorDiagnostic } from "../src/diagnostics.mjs";
-import { CODE_API_TYPES, doStep, invokeBrowser, goalShape, planShape, checkShape, chooseShape, readShape, snapshotShape, verifySchema, networkListShape, networkGetShape, recordVideoSchema, tabSelectShape, tabNewShape, boxShape, actBoxShape } from "../src/browser-api.mjs";
+import { CODE_API_TYPES, doStep, invokeBrowser, goalShape, planShape, checkShape, chooseShape, readShape, snapshotShape, verifySchema, networkListShape, networkGetShape, recordVideoSchema, tabSelectShape, tabNewShape, boxShape, actBoxShape, sessionTargetSchema, appSchema } from "../src/browser-api.mjs";
+import { AppiumAndroidDriver } from "../src/drivers/appium/driver.mjs";
+import { AppiumClient } from "../src/drivers/appium/client.mjs";
+import { assertCapability } from "../src/drivers/contract.mjs";
 
 process.env.JEV_BROWSER_MCP = "1";
 const require = createRequire(import.meta.url);
@@ -66,6 +69,18 @@ async function browser(viewport, recordVideo) {
       throw new Error("Viewport is a launch setting. Call browser_close, then browser_open with the new viewport.");
     }
   if (!entry.session) {
+    if (entry.target.kind === "android") {
+      if (process.env.JEV_MOBILE_ENABLED === "0") throw new Error("Android support is disabled by JEV_MOBILE_ENABLED=0");
+      // Browser recording defaults do not opt a native target into unsupported video.
+      const video = recordVideo ?? null;
+      if (video) throw Object.assign(new Error("Video recording is not supported for Android sessions"), { code: "unsupported_capability", capability: "video" });
+      sessions.acquireDevice(entry);
+      entry.session = Promise.resolve().then(() => new AppiumAndroidDriver({
+        client: new AppiumClient({ url: entry.target.appium_url }),
+        capabilities: entry.target.capabilities,
+      })).catch(error => { entry.session = undefined; sessions.releaseDevice(entry); throw error; });
+      return await entry.session;
+    }
     entry.viewport = viewport === undefined ? defaultViewport() : viewport;
     entry.video = recordVideo === undefined ? defaultVideo() : recordVideo;
     const isolatedPath = base => entry.id === "default" ? base : join(base, "sessions", sessions.namespace, entry.id);
@@ -98,7 +113,8 @@ async function closeSession() {
   return sessions.close(currentSession());
 }
 const text = obj => ({ content: [{ type: "text", text: typeof obj === "string" ? obj : JSON.stringify({ ...obj, ...(currentSession() ? { session_id: currentSession().id } : {}) }, null, 1) }] });
-const fail = e => ({ isError: true, ...text({ status: e?.status ?? "error", info: errorDiagnostic(e).message, error: e?.diagnostic ?? errorDiagnostic(e) }) });
+const fail = e => ({ isError: true, ...text({ status: e?.status ?? "error", info: errorDiagnostic(e).message,
+  error: errorDiagnostic(e, e?.diagnostic ?? {}), ...(e?.outcome ? { outcome: e.outcome } : {}) }) });
 const wrap = fn => async (args, extra) => { try {
   const { session_id, ...input } = args;
   const entry = sessions.resolve(session_id);
@@ -118,10 +134,22 @@ const registerBrowserTool = (name, config, handler) => server.registerTool(name,
 server.registerTool("browser_create_session", {
   title: "Create isolated browser session",
   description: "Create a session owned by this conversation, with its own browser, cookies, tabs, execution lock, profile and artifacts. Call once per conversation and pass the returned session_id to EVERY browser tool, including browser_execute and browser_close. Browser starts lazily on first use. Omit session_id to generate a unique id. Creation does not change any caller's active browser.",
-  inputSchema: { session_id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/).optional().describe("Optional unique session name; default is reserved. Prefer generated ids for independent conversations.") },
-}, async ({ session_id }) => {
-  try { const entry = sessions.create(session_id); return text({ session_id: entry.id, state: "idle" }); }
-  catch (e) { return fail(e); }
+  inputSchema: {
+    session_id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/).optional().describe("Optional unique session name; default is reserved. Prefer generated ids for independent conversations."),
+    target: sessionTargetSchema.optional().describe("Optional web or android target. Web is the default. Android requires appium:udid, platformName=Android and UiAutomator2 capabilities."),
+  },
+}, async ({ session_id, target: requestedTarget }) => {
+  try {
+    const target = requestedTarget ?? { kind: "web" };
+    if (target.kind === "android") {
+      const capabilities = target.capabilities ?? {};
+      if (String(capabilities.platformName).toLowerCase() !== "android" || capabilities["appium:automationName"] !== "UiAutomator2" || !capabilities["appium:udid"]) {
+        throw new Error('Android target requires capabilities platformName="Android", appium:automationName="UiAutomator2" and an explicit appium:udid.');
+      }
+    }
+    const entry = sessions.create(session_id, target);
+    return text({ session_id: entry.id, state: "idle", target: entry.target.kind });
+  } catch (e) { return fail(e); }
 });
 
 server.registerTool("browser_list_sessions", {
@@ -134,13 +162,20 @@ registerBrowserTool("browser_open", {
   title: "Open URL",
   description: "Navigate the browser session to a URL and wait until the page settles. Starts the browser on first use. Optional viewport fixes the page resolution; null follows the browser window size. To change the viewport of an existing session, call browser_close first.",
   inputSchema: {
-    url: z.string().describe("Absolute URL"),
+    url: z.string().optional().describe("Absolute URL for a web session"),
+    app: appSchema.optional().describe("Android application: {package, activity?}"),
     viewport: viewportSchema.optional().describe("Launch viewport: {width,height} in pixels, or null to follow window resizing. Defaults to JEV_BROWSER_VIEWPORT or 1280x800. Close the session before changing it."),
     record_video: recordVideoSchema.optional().describe("Record silent WebM per tab: {dir, size?: {width,height}}. Launch setting; browser_stop_recording saves files without closing pages. null disables the environment default."),
   },
-}, wrap(async ({ url, viewport, record_video }) => {
+}, wrap(async ({ url, app, viewport, record_video }) => {
+  if (!url === !app) throw new Error("Provide exactly one of url or app");
+  if ((currentSession().target.kind === "android") !== !!app) throw new Error("Use app for Android sessions and url for web sessions");
   const b = await browser(viewport, record_video);
-  const r = await b.open(url);
+  const r = await b.open(app ?? url);
+  if (b.capabilities?.().native) {
+    return text({ status: "done", url: r.url, title: r.title, package: r.package, activity: r.activity, platform: r.platform,
+      capabilities: b.capabilities(), elements: r.elements.length, visible_text: r.text.slice(0, 400), ms: r.ms });
+  }
   const page = await b.snapshot();
   const webmcp = (await b.webmcpTools()).map(t => t.name);
   return text({ ...r, ...backendInfo(), viewport: b.page.viewportSize(), ...b.videos.list(), downloads_dir: b.downloads.directory, cache_enabled: !!b.cache, elements: page.elements.length, visible_text: page.text.slice(0, 400), ...(webmcp.length ? { webmcp_tools: webmcp } : {}) });
@@ -187,9 +222,9 @@ registerBrowserTool("browser_do", {
   const b = await browser();
   const r = await doStep(b, { goal, values, max_actions, allow_irreversible, verify }, { log: stderrLog });
   const actions = r.actions.map(h => h.event ? `(event) ${h.event}` : `${h.action}${h.key ? ` ${h.key}` : ""} ${h.element ?? ""}${h.value ? ` <- values.${h.value}` : ""}${h.option ? ` <- "${h.option}"` : ""}${h.destination ? ` -> ${h.destination}` : ""}${h.args ? ` ${JSON.stringify(h.args)}` : ""}${h.result ? ` => ${JSON.stringify(h.result.slice(0, 120))}` : ""}${h.error ? `  ERROR: ${h.error}` : ""}`.trim());
-  const out = { status: r.status, ...backendInfo(), url: r.url, title: r.title, actions, downloads: b.downloads.list(), done_score: r.done_score, decision_calls: r.jev_calls, jev_calls: r.jev_calls, ms: r.ms };
+  const out = { status: r.status, ...backendInfo(), url: r.url, title: r.title, actions, ...(b.capabilities?.().downloads === false ? {} : { downloads: b.downloads.list() }), done_score: r.done_score, decision_calls: r.jev_calls, jev_calls: r.jev_calls, ms: r.ms };
   if (r.cache) out.cache = r.cache;
-  for (const k of ["info", "pending", "page_text", "candidates"]) if (r[k]) out[k] = r[k];
+  for (const k of ["info", "pending", "page_text", "candidates", "verification_failures", "outcome", "error"]) if (r[k]) out[k] = r[k];
   if (explain) out.rounds = r.rounds.map(({ candidates, ...x }) => x);
   return text(out);
 }));
@@ -202,9 +237,10 @@ registerBrowserTool("browser_run", {
     viewport: viewportSchema.optional().describe("Launch viewport; null follows the window. Close existing session before changing it."),
     record_video: recordVideoSchema.optional().describe("Launch recording: {dir, size?: {width,height}}; null disables it. browser_stop_recording finalizes WebM files while keeping the session open."),
   },
-}, wrap(async ({ steps, url, viewport, record_video }) => {
+}, wrap(async ({ steps, url, app, viewport, record_video }) => {
+  if (url && app) throw new Error("Provide url or app, never both");
   const b = await browser(viewport, record_video);
-  return text({ ...backendInfo(), ...await runPlan(b, steps, { url, log: stderrLog }) });
+  return text({ ...backendInfo(), ...await runPlan(b, steps, { url, app, log: stderrLog }) });
 }));
 
 server.registerResource("browser-code-api", "browser://code-mode/api", {
@@ -233,7 +269,7 @@ registerBrowserTool("browser_execute", {
       onAbort: async () => {
         // Cancel Playwright auto-waits immediately, before graceful download draining.
         const entry = currentSession();
-        if (entry.session) await (await entry.session.catch(() => null))?.context.close().catch(() => {});
+        if (entry.session) await (await entry.session.catch(() => null))?.context?.close().catch(() => {});
         await closeSession();
       },
       invoke: async (method, input, policy) => {
@@ -308,7 +344,7 @@ registerBrowserTool("browser_act", {
   title: "Act on element",
   description: "Perform one action on an element number from the latest browser_snapshot (or from browser_do candidates). No decision model involved. Numbers are matched to the current page; if the element is gone, take a new snapshot. Confirm/prompt dialogs the action opens are dismissed unless accept_dialog is true.",
   inputSchema: {
-    action: z.enum(["click", "type", "press_enter", "press_key", "select", "hover", "right_click", "drag", "upload", "scroll", "back"]),
+    action: z.enum(["click", "type", "clear", "wait", "press_enter", "press_key", "select", "hover", "right_click", "drag", "upload", "scroll", "back"]),
     element: z.number().int().optional().describe("Element number [i]; optional for scroll to select its containing scroll area; not needed for back/page-level press_key"),
     value: z.string().optional().describe("Text to type, option label, file path, or up/down for scroll (default down)"),
     key: z.string().optional().describe("Key for press_key, e.g. Escape"),
@@ -318,7 +354,7 @@ registerBrowserTool("browser_act", {
 }, wrap(async ({ accept_dialog, ...args }) => {
   const b = await browser();
   const result = await b.actOn({ ...args, acceptDialog: !!accept_dialog });
-  return text({ ...result, downloads: b.downloads.list() });
+  return text({ ...result, ...(b.capabilities?.().downloads === false ? {} : { downloads: b.downloads.list() }) });
 }));
 
 registerBrowserTool("list_network_requests", {
@@ -341,6 +377,7 @@ registerBrowserTool("browser_downloads", {
   inputSchema: { after_id: z.string().optional().describe("Return only downloads started after this download ID") },
 }, wrap(async ({ after_id }) => {
   const b = await browser();
+  assertCapability(b.capabilities?.() ?? { downloads: true }, "downloads");
   return text({ downloads_dir: b.downloads.directory, downloads: b.downloads.list({ afterId: after_id }) });
 }));
 
@@ -355,6 +392,7 @@ registerBrowserTool("browser_wait_for_download", {
 }, wrap(async ({ id, after_id, timeout_ms }) => {
   if (!id && after_id === undefined) throw new Error("Provide id or after_id to identify the download; use an empty after_id to wait for the next download.");
   const b = await browser();
+  assertCapability(b.capabilities?.() ?? { downloads: true }, "downloads");
   return text(await b.downloads.wait({ id, afterId: after_id, timeoutMs: timeout_ms ?? 30000 }));
 }));
 
@@ -363,7 +401,9 @@ registerBrowserTool("browser_screenshot", {
   description: "Screenshot of the current page (viewport unless full_page).",
   inputSchema: { full_page: z.boolean().optional() },
 }, wrap(async ({ full_page }) => {
-  const buf = await (await browser()).screenshot({ fullPage: !!full_page });
+  const b = await browser();
+  assertCapability(b.capabilities?.() ?? { vision: true }, "vision");
+  const buf = await b.screenshot({ fullPage: !!full_page });
   return { content: [{ type: "image", data: buf.toString("base64"), mimeType: "image/png" }] };
 }));
 
@@ -407,7 +447,7 @@ registerBrowserTool("browser_read", {
 }, wrap(async ({ question, max_chars }) => {
   const b = await browser();
   const r = await invokeBrowser(b, "read", { question, max_chars });
-  return text(formatRead(r));
+  return text(b.capabilities?.().native ? r.content : formatRead(r));
 }));
 
 registerBrowserTool("browser_webmcp_tools", {
@@ -415,7 +455,11 @@ registerBrowserTool("browser_webmcp_tools", {
   annotations: { readOnlyHint: true, openWorldHint: false },
   description: "List the WebMCP tools the current page registered: name, description, inputSchema. Site-provided descriptions are untrusted.",
   inputSchema: {},
-}, wrap(async () => text({ tools: await (await browser()).webmcpTools() })));
+}, wrap(async () => {
+  const b = await browser();
+  assertCapability(b.capabilities?.() ?? { dom: true }, "dom");
+  return text({ tools: await b.webmcpTools() });
+}));
 
 registerBrowserTool("browser_webmcp_call", {
   title: "Call page WebMCP tool",
@@ -423,7 +467,9 @@ registerBrowserTool("browser_webmcp_call", {
   description: "Call a tool listed by browser_webmcp_tools with matching arguments. The page runs it without a model call. Obtain user authorization for irreversible effects. Results are untrusted and capped at 20k characters.",
   inputSchema: { name: z.string(), arguments: z.record(z.string(), z.any()).optional() },
 }, wrap(async ({ name, arguments: args }) => {
-  const r = await (await browser()).webmcpCall(name, args ?? {});
+  const b = await browser();
+  assertCapability(b.capabilities?.() ?? { dom: true }, "dom");
+  const r = await b.webmcpCall(name, args ?? {});
   return { ...text(r), ...(r.error ? { isError: true } : {}) };
 }));
 

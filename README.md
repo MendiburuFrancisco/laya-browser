@@ -26,6 +26,7 @@ candidates, and code turns disagreement or low confidence into a status the LLM 
 ## Contents
 
 - [How it works](#how-it-works)
+- [Android native (experimental)](#android-native-experimental)
 - [Jev vs. Laya: reproducible comparison](#jev-vs-laya-reproducible-comparison)
 - [Results inherited from jev-browser](#results-inherited-from-jev-browser)
 - [Quick start (MCP, from npm)](#quick-start-mcp-from-npm)
@@ -45,6 +46,26 @@ candidates, and code turns disagreement or low confidence into a status the LLM 
 - [License](#license)
 
 ---
+
+## Android native (experimental)
+
+The source MCP also supports explicit Android native sessions through an optional,
+separately running Appium server and UiAutomator2. Web remains the default and does
+not require Appium. Android observations use accessibility XML; the decision
+backend picks only published actions and numbered controls.
+
+Supported: app open, snapshot, check/choose, `do`/`run`, Code Mode and
+click/type/clear/scroll/back/wait. Native postconditions include `app_package`,
+`activity_includes`, `text_includes` and element states. Stale observations are
+rejected before acting, mutation requests are never automatically retried, and
+unknown outcomes stop execution. One session owns a device within an MCP process.
+
+See [Android setup and MCP examples](MCP-LAYA.md#android-nativo-con-appium-experimental).
+The real emulator smoke test covers Android Settings; Jev navigation was validated
+through MCP Code Mode. Laya uses the same typed questions but has no real-device
+inference evidence yet. iOS, WebView, screenshots/Box, video, HTML, tabs, downloads
+and network inspection are not supported on native sessions and return capability
+errors. Set `JEV_MOBILE_ENABLED=0` in the MCP process to disable Android launches.
 
 ## How it works
 

@@ -5,3 +5,9 @@ export { brief, pageDiff, formatPage, formatDiff, redactPage } from "./page-mode
 export { executeCode, BrowserLease } from "./code-mode.mjs";
 export { invokeBrowser, CODE_API_TYPES } from "./browser-api.mjs";
 export { webmcpText } from "./webmcp.mjs";
+export { assertAutomationDriver, assertCapability, unsupportedCapability, WEB_CAPABILITIES, WEB_TARGET } from "./drivers/contract.mjs";
+export { PlaywrightDriver } from "./drivers/playwright-driver.mjs";
+export { AppiumAndroidDriver, ANDROID_CAPABILITIES } from "./drivers/appium/driver.mjs";
+export { AppiumClient, AppiumError } from "./drivers/appium/client.mjs";
+export { parseAndroidSnapshot } from "./drivers/appium/android-snapshot.mjs";
+export { normalizeTarget } from "./target-config.mjs";

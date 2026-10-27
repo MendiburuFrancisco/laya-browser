@@ -4,11 +4,21 @@ import { runPlan, verificationFailures } from "./plan.mjs";
 import { stoppedInfo, actionFailures } from "./diagnostics.mjs";
 import { RESOURCE_TYPES } from "./network.mjs";
 import { BOX_ACTIONS } from "./vision.mjs";
+import { assertCapability } from "./drivers/contract.mjs";
 
 export const valuesSchema = z.record(z.string(), z.string());
+export const appSchema = z.object({ package: z.string().min(1), activity: z.string().min(1).optional() }).strict();
+export const sessionTargetSchema = z.object({
+  kind: z.enum(["web", "android"]),
+  appium_url: z.string().url().optional(),
+  capabilities: z.record(z.string(), z.unknown()).optional(),
+}).strict();
 export const verifySchema = z.object({
   url_includes: z.string().min(1).optional(),
   text_includes: z.string().min(1).optional(),
+  app_package: z.string().min(1).optional(),
+  activity_includes: z.string().min(1).optional(),
+  element: z.object({ label: z.string().min(1), state: z.enum(["enabled", "disabled", "checked", "unchecked", "selected", "clickable"]) }).strict().optional(),
   field: z.object({ label: z.string().min(1), value_key: z.string().min(1) }).strict().optional(),
   download: z.object({ filename: z.string().optional(), timeout_ms: z.number().int().min(100).max(300000).optional() }).strict().optional(),
 }).strict();
@@ -17,7 +27,7 @@ export const goalShape = {
   max_actions: z.number().int().min(1).max(30).optional(),
 };
 export const stepSchema = z.object({ ...goalShape, allow_irreversible: z.boolean().optional(), verify: verifySchema.optional() }).strict();
-export const planShape = { url: z.string().optional(), steps: z.array(stepSchema).min(1).max(30) };
+export const planShape = { url: z.string().optional(), app: appSchema.optional(), steps: z.array(stepSchema).min(1).max(30) };
 export const checkShape = { question: z.string().min(1), visual: z.boolean().optional().describe("Jev only: answer using a fresh viewport screenshot. check also detects visual questions automatically.") };
 export const boxShape = { target: z.string().min(1).describe("Unique visible target to find in a fresh screenshot (Jev only)") };
 export const actBoxShape = {
@@ -52,9 +62,11 @@ export const recordVideoSchema = z.object({
 // Code cannot grant itself irreversible-action permission. The caller supplies exact goals
 // separately from the program, and the host applies that policy to every do/run step.
 export const codeSchemas = {
-  open: z.object({ url: z.string().min(1) }).strict(),
+  open: z.object({ url: z.string().min(1).optional(), app: appSchema.optional() }).strict()
+    .refine(v => !!v.url !== !!v.app, "Provide exactly one of url or app"),
   do: z.object({ ...goalShape, verify: verifySchema.optional() }).strict(),
-  run: z.object({ url: z.string().optional(), steps: z.array(z.object({ ...goalShape, verify: verifySchema.optional() }).strict()).min(1).max(30) }).strict(),
+  run: z.object({ url: z.string().optional(), app: appSchema.optional(), steps: z.array(z.object({ ...goalShape, verify: verifySchema.optional() }).strict()).min(1).max(30) }).strict()
+    .refine(v => !(v.url && v.app), "Provide url or app, never both"),
   check: z.object(checkShape).strict(), choose: z.object(chooseShape).strict(),
   box: z.object(boxShape).strict(), actBox: z.object(actBoxShape).strict(),
   read: z.object(readShape).strict(), snapshot: z.object(snapshotShape).strict(),
@@ -84,19 +96,28 @@ export async function doStep(b, step, { log = () => {} } = {}) {
 }
 
 export function compactGoal(r) {
-  const compact = Object.fromEntries(["status", "goal", "url", "title", "done_score", "ms", "info", "pending", "candidates", "page_text", "cache", "verification_failures"]
+  const compact = Object.fromEntries(["status", "goal", "url", "title", "done_score", "ms", "info", "pending", "candidates", "page_text", "cache", "verification_failures", "outcome", "error"]
     .filter(k => r[k] !== undefined).map(k => [k, r[k]]).concat([["decision_calls", r.jev_calls ?? 0]]));
   return r.status && r.status !== "done" ? { ...compact, info: stoppedInfo(r), ...actionFailures(r) } : compact;
 }
 
+const METHOD_CAPABILITIES = {
+  getHtml: "dom", listTabs: "tabs", newTab: "tabs", selectTab: "tabs",
+  videos: "video", stopRecording: "video", startRecording: "video",
+  downloads: "downloads", waitForDownload: "downloads",
+  listNetworkRequests: "network", getNetworkRequest: "network",
+  box: "vision", actBox: "vision",
+};
+
 export async function invokeBrowser(b, method, input, { authorizedGoals = [], log = () => {}, onProgress } = {}) {
   if (!Object.hasOwn(codeSchemas, method)) throw new Error(`Unknown browser method: ${method}`);
+  if (METHOD_CAPABILITIES[method]) assertCapability(b.capabilities?.() ?? { [METHOD_CAPABILITIES[method]]: true }, METHOD_CAPABILITIES[method]);
   const args = codeSchemas[method].parse(input);
   const authorize = step => ({ ...step, allow_irreversible: authorizedGoals.includes(step.goal) });
   switch (method) {
-    case "open": return { status: "done", ...await b.open(args.url) };
+    case "open": return { status: "done", ...await b.open(args.app ?? args.url) };
     case "do": return compactGoal(await doStep(b, authorize(args), { log }));
-    case "run": return runPlan(b, args.steps.map(authorize), { url: args.url, log, onProgress });
+    case "run": return runPlan(b, args.steps.map(authorize), { url: args.url, app: args.app, log, onProgress });
     case "check": return { p_yes: await b.check(args.question, { visual: args.visual }) };
     case "choose": return b.choose(args.question, args.options, { visual: args.visual });
     case "box": return b.box(args.target);
@@ -122,6 +143,8 @@ export const CODE_API_TYPES = `
 type Status = "done" | "likely_done" | "needs_login" | "needs_confirmation" | "ambiguous" | "blocked" | "stuck" | "max_actions" | "error" | "verification_failed";
 interface Verify {
   url_includes?: string; text_includes?: string;
+  app_package?: string; activity_includes?: string;
+  element?: { label: string; state: "enabled" | "disabled" | "checked" | "unchecked" | "selected" | "clickable" };
   field?: { label: string; value_key: string };
   download?: { filename?: string; timeout_ms?: number };
 }
@@ -158,9 +181,9 @@ interface BrowserCodeAPI {
   getHtml(input?: {}): Promise<{ url: string; html: string }>;
   listNetworkRequests(input?: { resource_types?: ResourceType[]; url_contains?: string; page?: number; page_size?: number }): Promise<{ requests: NetworkRequest[]; total: number; page: number; page_size: number; retained: number; dropped: number }>;
   getNetworkRequest(input: { id: string }): Promise<NetworkDetail>;
-  open(input: { url: string }): Promise<{ status: "done"; url: string; title: string }>;
+  open(input: { url: string; app?: never } | { app: { package: string; activity?: string }; url?: never }): Promise<{ status: "done"; url: string; title: string }>;
   do(input: Step): Promise<GoalResult>;
-  run(input: { url?: string; steps: Step[] }): Promise<PlanResult>;
+  run(input: { url?: string; app?: { package: string; activity?: string }; steps: Step[] }): Promise<PlanResult>;
   // Jev only: visual=true sends a fresh screenshot; check detects visual questions automatically.
   check(input: { question: string; visual?: boolean }): Promise<{ p_yes: number }>;
   choose(input: { question: string; options: string[]; visual?: boolean }): Promise<{ choice: string; confidence: number; probabilities: Record<string, number> }>;

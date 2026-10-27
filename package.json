@@ -51,6 +51,8 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "test:e2e": "node test/mcp.e2e.mjs",
+    "test:android": "node --test test/android-actions.test.mjs test/android-mcp.test.mjs test/appium-driver.test.mjs",
+    "test:e2e:android": "node --test test/android.e2e.mjs",
     "bench": "node bench/run.mjs",
     "bench:cost": "node bench/context-cost.mjs",
     "bench:compare": "node bench/compare-backends.mjs",
