@@ -23,10 +23,10 @@ import { executeCode, executeShape } from "../src/code-mode.mjs";
 import { BrowserSessions } from "../src/browser-sessions.mjs";
 import { LocatorCache } from "../src/locator-cache.mjs";
 import { errorDiagnostic } from "../src/diagnostics.mjs";
-import { CODE_API_TYPES, doStep, invokeBrowser, goalShape, planShape, checkShape, chooseShape, readShape, snapshotShape, verifySchema, networkListShape, networkGetShape, recordVideoSchema, tabSelectShape, tabNewShape, boxShape, actBoxShape, sessionTargetSchema, appSchema } from "../src/browser-api.mjs";
+import { CODE_API_TYPES, doStep, invokeBrowser, assertOperationCapability, goalShape, planShape, checkShape, chooseShape, readShape, snapshotShape, verifySchema, networkListShape, networkGetShape, recordVideoSchema, tabSelectShape, tabNewShape, boxShape, actBoxShape, sessionTargetSchema, appSchema } from "../src/browser-api.mjs";
 import { AppiumAndroidDriver } from "../src/drivers/appium/driver.mjs";
 import { AppiumClient } from "../src/drivers/appium/client.mjs";
-import { assertCapability } from "../src/drivers/contract.mjs";
+import { openAutomationTarget } from "../src/drivers/contract.mjs";
 
 process.env.JEV_BROWSER_MCP = "1";
 const require = createRequire(import.meta.url);
@@ -76,7 +76,7 @@ async function browser(viewport, recordVideo) {
       if (video) throw Object.assign(new Error("Video recording is not supported for Android sessions"), { code: "unsupported_capability", capability: "video" });
       sessions.acquireDevice(entry);
       entry.session = Promise.resolve().then(() => new AppiumAndroidDriver({
-        client: new AppiumClient({ url: entry.target.appium_url }),
+        client: new AppiumClient({ url: entry.target.appium_url, logger: event => stderrLog(JSON.stringify(event)) }),
         capabilities: entry.target.capabilities,
       })).catch(error => { entry.session = undefined; sessions.releaseDevice(entry); throw error; });
       return await entry.session;
@@ -171,14 +171,14 @@ registerBrowserTool("browser_open", {
   if (!url === !app) throw new Error("Provide exactly one of url or app");
   if ((currentSession().target.kind === "android") !== !!app) throw new Error("Use app for Android sessions and url for web sessions");
   const b = await browser(viewport, record_video);
-  const r = await b.open(app ?? url);
+   const r = await openAutomationTarget(b, { url, app });
   if (b.capabilities?.().native) {
     return text({ status: "done", url: r.url, title: r.title, package: r.package, activity: r.activity, platform: r.platform,
       capabilities: b.capabilities(), elements: r.elements.length, visible_text: r.text.slice(0, 400), ms: r.ms });
   }
   const page = await b.snapshot();
   const webmcp = (await b.webmcpTools()).map(t => t.name);
-  return text({ ...r, ...backendInfo(), viewport: b.page.viewportSize(), ...b.videos.list(), downloads_dir: b.downloads.directory, cache_enabled: !!b.cache, elements: page.elements.length, visible_text: page.text.slice(0, 400), ...(webmcp.length ? { webmcp_tools: webmcp } : {}) });
+  return text({ ...r, ...backendInfo(), viewport: b.viewportSize(), ...b.videos.list(), downloads_dir: b.downloads.directory, cache_enabled: !!b.cache, elements: page.elements.length, visible_text: page.text.slice(0, 400), ...(webmcp.length ? { webmcp_tools: webmcp } : {}) });
 }));
 
 registerBrowserTool("browser_list_tabs", {
@@ -269,7 +269,7 @@ registerBrowserTool("browser_execute", {
       onAbort: async () => {
         // Cancel Playwright auto-waits immediately, before graceful download draining.
         const entry = currentSession();
-        if (entry.session) await (await entry.session.catch(() => null))?.context?.close().catch(() => {});
+        if (entry.session) await (await entry.session.catch(() => null))?.interrupt?.().catch(() => {});
         await closeSession();
       },
       invoke: async (method, input, policy) => {
@@ -377,7 +377,7 @@ registerBrowserTool("browser_downloads", {
   inputSchema: { after_id: z.string().optional().describe("Return only downloads started after this download ID") },
 }, wrap(async ({ after_id }) => {
   const b = await browser();
-  assertCapability(b.capabilities?.() ?? { downloads: true }, "downloads");
+  assertOperationCapability(b, "downloads");
   return text({ downloads_dir: b.downloads.directory, downloads: b.downloads.list({ afterId: after_id }) });
 }));
 
@@ -392,7 +392,7 @@ registerBrowserTool("browser_wait_for_download", {
 }, wrap(async ({ id, after_id, timeout_ms }) => {
   if (!id && after_id === undefined) throw new Error("Provide id or after_id to identify the download; use an empty after_id to wait for the next download.");
   const b = await browser();
-  assertCapability(b.capabilities?.() ?? { downloads: true }, "downloads");
+  assertOperationCapability(b, "waitForDownload");
   return text(await b.downloads.wait({ id, afterId: after_id, timeoutMs: timeout_ms ?? 30000 }));
 }));
 
@@ -402,7 +402,7 @@ registerBrowserTool("browser_screenshot", {
   inputSchema: { full_page: z.boolean().optional() },
 }, wrap(async ({ full_page }) => {
   const b = await browser();
-  assertCapability(b.capabilities?.() ?? { vision: true }, "vision");
+  assertOperationCapability(b, "screenshot");
   const buf = await b.screenshot({ fullPage: !!full_page });
   return { content: [{ type: "image", data: buf.toString("base64"), mimeType: "image/png" }] };
 }));
@@ -457,7 +457,7 @@ registerBrowserTool("browser_webmcp_tools", {
   inputSchema: {},
 }, wrap(async () => {
   const b = await browser();
-  assertCapability(b.capabilities?.() ?? { dom: true }, "dom");
+  assertOperationCapability(b, "webmcpTools");
   return text({ tools: await b.webmcpTools() });
 }));
 
@@ -468,7 +468,7 @@ registerBrowserTool("browser_webmcp_call", {
   inputSchema: { name: z.string(), arguments: z.record(z.string(), z.any()).optional() },
 }, wrap(async ({ name, arguments: args }) => {
   const b = await browser();
-  assertCapability(b.capabilities?.() ?? { dom: true }, "dom");
+  assertOperationCapability(b, "webmcpCall");
   const r = await b.webmcpCall(name, args ?? {});
   return { ...text(r), ...(r.error ? { isError: true } : {}) };
 }));

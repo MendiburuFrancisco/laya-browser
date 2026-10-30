@@ -1,64 +1,116 @@
+import { randomUUID } from "node:crypto";
+
 export class AppiumError extends Error {
-  constructor(message, { status, method, path, outcome = "known" } = {}) {
+  constructor(message, { status, method, path, outcome = "known", code = "appium_error", phase, transportPhase, attemptId, durationMs } = {}) {
     super(message);
     this.name = "AppiumError";
     this.httpStatus = status;
-    this.code = "appium_error";
+    this.code = code;
     this.method = method;
     this.path = path;
     this.outcome = outcome;
-    this.diagnostic = { phase: mutationPhase(method), outcome };
+    this.diagnostic = {
+      phase: phase ?? mutationPhase(method), outcome,
+      ...(transportPhase ? { transport_phase: transportPhase } : {}),
+      ...(attemptId ? { attempt_id: attemptId } : {}),
+      ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
+      ...(status !== undefined ? { http_status: status } : {}),
+    };
   }
 }
 
 const mutationPhase = method => ["POST", "DELETE"].includes(method) ? "mobile_action" : "mobile_observation";
+const SAFE_CAPABILITIES = ["platformName", "appium:automationName", "appium:udid", "appium:appPackage", "appium:appActivity", "appium:appWaitActivity", "appium:newCommandTimeout", "appium:noReset", "appium:forceAppLaunch"];
+const safeCapabilities = capabilities => Object.fromEntries(SAFE_CAPABILITIES.filter(key => capabilities?.[key] !== undefined).map(key => [key, capabilities[key]]));
+const connectionFailure = error => error?.name !== "SyntaxError" && (/^(UND_ERR_SOCKET|ECONNRESET|ECONNREFUSED|ENOTFOUND|EPIPE|ENETUNREACH|ETIMEDOUT)$/.test(error?.code) || /fetch failed|terminated|socket|network error|connection (?:closed|lost|reset)/i.test(error?.message ?? ""));
 
 export class AppiumClient {
-  constructor({ url = process.env.APPIUM_URL ?? "http://127.0.0.1:4723", fetchImpl = fetch, timeoutMs = 15000, createTimeoutMs = 90000 } = {}) {
+  constructor({ url = process.env.APPIUM_URL ?? "http://127.0.0.1:4723", fetchImpl = fetch, timeoutMs = 15000, createTimeoutMs = 90000, logger = () => {} } = {}) {
     this.baseUrl = new URL(url);
     if (!["http:", "https:"].includes(this.baseUrl.protocol) || this.baseUrl.username || this.baseUrl.password || this.baseUrl.search || this.baseUrl.hash) throw new TypeError("Appium URL must be HTTP(S) without credentials, query or fragment");
     this.fetch = fetchImpl;
     this.timeoutMs = timeoutMs;
     this.createTimeoutMs = createTimeoutMs;
+    this.logger = logger;
     this.sessionId = null;
   }
 
-  async request(method, path, body, { mutation = false, timeoutMs = this.timeoutMs, signal = this.getSignal?.() } = {}) {
+  trace(event, { attemptId, operation, transportPhase, started, ...detail } = {}) {
+    const record = {
+      event,
+      ...(attemptId ? { attempt_id: attemptId } : {}),
+      ...(operation ? { operation } : {}),
+      ...(transportPhase ? { transport_phase: transportPhase } : {}),
+      ...(started !== undefined ? { duration_ms: Date.now() - started } : {}),
+      ...detail,
+    };
+    try { this.logger(record); } catch {}
+  }
+
+  async request(method, path, body, { mutation = false, timeoutMs = this.timeoutMs, signal = this.getSignal?.(), attemptId = randomUUID(), operation = mutationPhase(method) } = {}) {
+    const started = Date.now();
+    let response, payload, transportPhase = "http_headers";
+    const fail = (code, message, outcome) => {
+      this.trace("http_error", { attemptId, operation, transportPhase, started, code, outcome, http_status: response?.status });
+      return new AppiumError(message, { status: response?.status, method, path, outcome, code, phase: operation, transportPhase, attemptId, durationMs: Date.now() - started });
+    };
+    if (signal?.aborted) {
+      transportPhase = "preflight";
+      throw fail("appium_aborted", `Appium ${method} aborted before the request was sent`, "known");
+    }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    let response, payload;
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+    this.trace("http_request", { attemptId, operation, transportPhase, started, method, path });
     try {
       response = await this.fetch(new URL(path.replace(/^\//, ""), this.baseUrl.href.endsWith("/") ? this.baseUrl : `${this.baseUrl.href}/`), {
         method, headers: body === undefined ? {} : { "content-type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body), signal: signal ? AbortSignal.any([controller.signal, signal]) : controller.signal,
       });
+      this.trace("http_headers", { attemptId, operation, transportPhase, started, http_status: response.status });
+      transportPhase = "http_body";
       payload = await response.json();
-    } catch {
-      throw new AppiumError(`Appium ${method} response unavailable or invalid`, { method, path, outcome: mutation ? "unknown" : "known" });
+      this.trace("http_body", { attemptId, operation, transportPhase, started, http_status: response.status });
+    } catch (cause) {
+      const disconnected = connectionFailure(cause);
+      const code = signal?.aborted ? "appium_aborted" : timedOut ? "appium_timeout" : response && !disconnected ? "appium_invalid_response" : "appium_connection_error";
+      const detail = signal?.aborted ? "aborted by the caller" : timedOut ? `timed out after ${timeoutMs} ms` : response && !disconnected ? "returned an invalid response body" : "connection failed";
+      throw fail(code, `Appium ${method} ${detail} during ${transportPhase}`, mutation ? "unknown" : "known");
     } finally { clearTimeout(timer); }
     if (!response.ok || payload?.value?.error) {
-      // Server messages may echo typed secrets or XPath text. Report only the protocol code.
-      throw new AppiumError(`Appium ${method}: ${payload?.value?.error ?? `HTTP ${response.status}`}`, { status: response.status, method, path });
+      const expired = payload?.value?.error === "invalid session id";
+      const code = expired ? "appium_session_expired" : "appium_http_error";
+      const message = expired ? "Appium session is expired or no longer available" : `Appium ${method}: ${payload?.value?.error ?? `HTTP ${response.status}`}`;
+      this.trace("http_error", { attemptId, operation, transportPhase, started, code, outcome: "known", http_status: response.status });
+      throw new AppiumError(message, { status: response.status, method, path, code, phase: operation, transportPhase, attemptId, durationMs: Date.now() - started });
     }
     return payload?.value ?? payload;
   }
 
   async createSession(capabilities) {
-    if (this.sessionId) throw new AppiumError("Appium session already exists");
-    if (this.creating) throw new AppiumError("Appium session creation is already in progress");
-    if (this.creationUnknown) throw new AppiumError("Previous session creation outcome is unknown; resolve it on the Appium server before creating another session", { outcome: "unknown" });
+    if (this.sessionId) throw new AppiumError("Appium session already exists", { phase: "session_create" });
+    if (this.creating) throw new AppiumError("Appium session creation is already in progress", { phase: "session_create" });
+    if (this.creationUnknown) throw new AppiumError("Previous session creation outcome is unknown; resolve it on the Appium server before creating another session", { outcome: "unknown", phase: "session_create", attemptId: this.lastAttemptId });
+    const attemptId = randomUUID(), started = Date.now();
+    this.lastAttemptId = attemptId;
     let result;
     this.creating = true;
+    this.trace("session_create", { attemptId, operation: "session_create", started, state: "started", capabilities: safeCapabilities(capabilities) });
     try {
-      result = await this.request("POST", "/session", { capabilities: { alwaysMatch: capabilities, firstMatch: [{}] } }, { mutation: true, timeoutMs: this.createTimeoutMs });
-    } catch (error) { if (error.outcome === "unknown") this.creationUnknown = true; throw error; }
-    finally { this.creating = false; }
+      result = await this.request("POST", "/session", { capabilities: { alwaysMatch: capabilities, firstMatch: [{}] } }, { mutation: true, timeoutMs: this.createTimeoutMs, attemptId, operation: "session_create" });
+    } catch (error) {
+      if (error.outcome === "unknown") this.creationUnknown = true;
+      this.trace("session_create", { attemptId, operation: "session_create", started, state: "failed", code: error.code, outcome: error.outcome });
+      throw error;
+    } finally { this.creating = false; }
     const id = result?.sessionId ?? result?.session_id;
     if (!id) {
       this.creationUnknown = true;
-      throw new AppiumError("Appium created a session without returning its session id", { method: "POST", path: "/session", outcome: "unknown" });
+      this.trace("session_create", { attemptId, operation: "session_create", started, state: "failed", code: "appium_session_id_missing", outcome: "unknown" });
+      throw new AppiumError("Appium created a session without returning its session id", { method: "POST", path: "/session", outcome: "unknown", code: "appium_session_id_missing", phase: "session_id_extract", attemptId, durationMs: Date.now() - started });
     }
     this.sessionId = id;
+    this.trace("session_create", { attemptId, operation: "session_create", started, state: "confirmed", session_id: id });
     return result;
   }
 
@@ -80,14 +132,26 @@ export class AppiumClient {
 
   async closeSession() {
     if (this.closing) return this.closing;
-    if (this.creationUnknown || this.closeUnknown) throw new AppiumError("Session cleanup outcome is unknown; resolve it on the Appium server", { method: "DELETE", outcome: "unknown" });
+    if (this.creationUnknown || this.closeUnknown) throw new AppiumError("Session cleanup outcome is unknown; resolve it on the Appium server", { method: "DELETE", outcome: "unknown", phase: "cleanup", attemptId: this.lastAttemptId });
     if (!this.sessionId) return;
     const id = this.sessionId;
-    this.closing = this.request("DELETE", `/session/${encodeURIComponent(id)}`, undefined, { mutation: true, signal: null });
-    try {
-      await this.closing;
-    } catch (error) { if (error.outcome === "unknown") this.closeUnknown = true; throw error; }
-    finally { this.closing = null; }
-    this.sessionId = null;
+    const attemptId = randomUUID();
+    this.lastAttemptId = attemptId;
+    const closing = (async () => {
+      try {
+        await this.request("DELETE", `/session/${encodeURIComponent(id)}`, undefined, { mutation: true, signal: null, attemptId, operation: "cleanup" });
+        this.sessionId = null;
+      } catch (error) {
+        if (error.code === "appium_session_expired") {
+          this.sessionId = null;
+          return { expired: true };
+        }
+        if (error.outcome === "unknown") this.closeUnknown = true;
+        throw error;
+      }
+    })();
+    this.closing = closing;
+    try { return await closing; }
+    finally { if (this.closing === closing) this.closing = null; }
   }
 }

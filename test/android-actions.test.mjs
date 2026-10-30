@@ -56,6 +56,22 @@ test("invented actions or incompatible targets never reach Appium", async () => 
   }
 });
 
+test("Android scroll ignores a value-key answer intended only for type", async () => {
+  const { driver, mutations, change } = fixture();
+  const snapshot = driver.snapshot.bind(driver);
+  driver.snapshot = async () => {
+    const page = await snapshot();
+    page.elements[0].actions.push("scroll");
+    return page;
+  };
+  let decisions = 0;
+  driver.ask = async () => ({ answers: decisions++ === 0 ? answers({ tool: { choice: "scroll" }, value: { choice: "email" }, direction: { choice: "down" } }) : answers({ done: { noul: 1 } }), ms: 0, tokens: 0 });
+  const result = await driver.do("Reveal content", { values: { email: "test@example.org" } });
+  assert.equal(result.status, "done");
+  assert.equal(mutations.length, 1);
+  assert.equal(mutations[0].path, "actions");
+});
+
 test("irreversible and unanswered policy require confirmation before mutation", async () => {
   for (const irreversible of [{ noul: 1 }, undefined]) {
     const { driver, mutations } = fixture();

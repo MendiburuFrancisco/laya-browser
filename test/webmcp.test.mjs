@@ -172,7 +172,8 @@ test("browser_do: a secret filled into a page tool's argument is never sent to J
   const act = { webmcp: "add_todo", schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } };
   const args = await b.webmcpArgs({ url: "", title: "", text: "" }, "Add it", [], act, { password: "hunter2" });
   delete b.ask;
-  assert.equal(r.actions[0].result, "added hunter2");   // the page got the real value
+  assert.equal(r.actions[0].result, "added [redacted]");
+  assert.doesNotMatch(JSON.stringify(r), /hunter2/);
   assert.deepEqual(args, { text: "hunter2" });
   assert.ok(!JSON.stringify(sent).includes("hunter2"));
 });

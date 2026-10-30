@@ -128,9 +128,36 @@ en `values`; nunca incluyas secretos en el texto del objetivo.
 - No hay retries de POST/DELETE. Si se pierde una respuesta, el resultado incluye
   `outcome: "unknown"`. Inspecciona Appium antes de repetir el objetivo.
 - Si se desconoce el resultado de creación/cierre, el cliente no recrea ni repite
-  el cierre. Un fallo de cleanup conserva el lease; resolverlo puede requerir
-  reiniciar el servidor Appium y el MCP.
+  el cierre. Un fallo de cleanup conserva el lease. Conciliar el estado remoto
+  mediante logs o mecanismos soportados del servidor propio antes de recuperar
+  la sesión; no reiniciar servidores ajenos ni borrar el lease para permitir un retry.
 - Desactivar Android: `JEV_MOBILE_ENABLED=0` en el entorno del proceso MCP.
+
+### Apertura y diagnóstico de sesión
+
+- La creación Appium tiene un límite de 90000 ms y cada comando de 15000 ms,
+  incluida la lectura del cuerpo HTTP. Code Mode dispone de 120000 ms por defecto;
+  el deadline del cliente MCP debe cubrir la operación solicitada.
+- `appium:newCommandTimeout` es 600 segundos por defecto para sesiones interactivas.
+  Un valor explícito del target, igual que `appium:appWaitActivity`, se preserva.
+  Una sesión expirada se informa como `appium_session_expired`, sin recreación ni replay.
+- Los errores incluyen `phase`, `transport_phase`, `attempt_id`, `duration_ms`,
+  `http_status` cuando existe y `outcome`. Los códigos distinguen timeout,
+  aborto, conexión perdida, cuerpo inválido, error HTTP y ausencia de session ID.
+  Un aborto anterior al envío tiene resultado conocido; después del envío puede
+  ser desconocido.
+- `JEV_BROWSER_LOG=1` habilita trazas JSON saneadas en stderr: fases de creación,
+  headers/cuerpo, primera observación y cleanup. Solo se registra una lista segura
+  de capabilities; no se registran cuerpos de solicitudes/respuestas ni valores escritos.
+- Si falla la primera observación, se cancelan y drenan sus solicitudes hermanas
+  antes de cerrar el session ID propio confirmado. Si también falla el cierre,
+  `error.cleanup` conserva ese diagnóstico sin reemplazar el error primario.
+- Para proteger también un identificador de acceso en snapshots/modelo, pasa su
+  valor mediante una clave sensible como `secret_email`. Los campos password se
+  redactan; no incluyas credenciales en objetivos, scripts ni logs de Appium.
+
+La evidencia de apertura WeHealthy directa/Code Mode, pausa y selección de plan
+está registrada en `docs/ai-workflow/mobile-appium-mcp/diagnosis.md`.
 
 ### Pruebas reproducibles
 

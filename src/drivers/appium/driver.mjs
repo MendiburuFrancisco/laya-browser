@@ -1,26 +1,18 @@
 import { createHash } from "node:crypto";
 import { AppiumClient } from "./client.mjs";
 import { parseAndroidSnapshot } from "./android-snapshot.mjs";
-import { formatPage, formatDiff, pageDiff, redactPage, brief, redactValues, SECRET_KEY, REDACTED } from "../../page-model.mjs";
+import { formatPage, formatDiff, pageDiff, brief } from "../../page-model.mjs";
 import { performAndroidAction } from "./android-actions.mjs";
 import { jev } from "../../jev.mjs";
+import { assertFreshness, assertObservation } from "../contract.mjs";
+import { GoalRunner, assertExecution as assertDriverExecution, consumeAction as consumeDriverAction, callDecision, redactStrings } from "../../goal-runner.mjs";
+import { AndroidGoalStrategy } from "../../goal-strategies/android.mjs";
+import { errorDiagnostic } from "../../diagnostics.mjs";
 
 export const ANDROID_CAPABILITIES = Object.freeze({
   driver: "appium", platform: "android", native: true, dom: false, tabs: false,
   network: false, downloads: false, video: false, vision: false,
 });
-
-// Redact strings structurally: replacing inside serialized JSON corrupts numeric
-// bounds/indices when a secret happens to contain the same digits.
-function redactStrings(value, secrets) {
-  if (typeof value === "string") {
-    for (const secret of secrets ?? []) value = value.split(REDACTED).map(part => part.split(secret).join(REDACTED)).join(REDACTED);
-    return value;
-  }
-  if (Array.isArray(value)) return value.map(item => redactStrings(item, secrets));
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactStrings(item, secrets)]));
-  return value;
-}
 
 export class AppiumAndroidDriver {
   constructor({ client = new AppiumClient(), capabilities = {}, maxElements = 240, maxText = 12000 } = {}) {
@@ -35,51 +27,45 @@ export class AppiumAndroidDriver {
     this.events = [];
     this.shown = null;
     this.diffBase = null;
+    this.goalRunner = new GoalRunner(this, new AndroidGoalStrategy(this));
   }
 
-  assertExecution() {
-    this.execution?.signal?.throwIfAborted();
-    if (this.execution?.error) throw this.execution.error;
-  }
-
-  consumeAction() {
-    this.assertExecution();
-    if (this.execution && this.execution.remainingActions-- <= 0) {
-      this.execution.error = Object.assign(new Error("Browser action budget exhausted"), { status: "limit_exceeded" });
-      throw this.execution.error;
-    }
-  }
-
-  async call(state, questions, options = {}) {
-    this.assertExecution();
-    if (this.execution && this.execution.remainingCalls-- <= 0) {
-      this.execution.error = Object.assign(new Error("Decision call budget exhausted"), { status: "limit_exceeded" });
-      throw this.execution.error;
-    }
-    if (state.page) state = { ...state, page: redactPage(state.page) };
-    if (this.secrets?.size) state = redactStrings(state, this.secrets);
-    const result = await this.ask(state, questions, { ...options, signal: this.execution?.signal });
-    this.stats.calls++;
-    this.stats.jev_ms += result.ms;
-    this.stats.tokens += result.tokens;
-    return result;
-  }
+  assertExecution() { assertDriverExecution(this); }
+  consumeAction() { consumeDriverAction(this); }
+  call(state, questions, options = {}) { return callDecision(this, state, questions, options); }
 
   ask(state, questions, options) { return jev(state, questions, options); }
 
   async open({ package: packageName, activity } = {}) {
     if (typeof packageName !== "string" || !packageName) throw new TypeError("app.package is required");
     if (this.opened) throw new Error("Close the Android session before opening another application");
-    const caps = { platformName: "Android", "appium:automationName": "UiAutomator2", ...this.capabilityOverrides,
+    const caps = { platformName: "Android", "appium:automationName": "UiAutomator2", "appium:newCommandTimeout": 600, ...this.capabilityOverrides,
       "appium:appPackage": packageName, ...(activity ? { "appium:appActivity": activity } : {}) };
     if (String(caps.platformName).toLowerCase() !== "android") throw new Error("Android target requires platformName=Android");
     if (caps["appium:automationName"] !== "UiAutomator2") throw new Error("Android target requires appium:automationName=UiAutomator2");
     const started = Date.now();
     await this.client.createSession(caps);
+    const attemptId = this.client.lastAttemptId;
     this.package = packageName;
     this.opened = true;
-    const page = await this.snapshot();
-    return { ...page, ms: Date.now() - started };
+    const observationStarted = Date.now();
+    try {
+      const page = await this.snapshot({ attemptId });
+      this.client.trace?.("initial_observation", { attemptId, operation: "mobile_observation", started: observationStarted, state: "confirmed" });
+      return { ...page, ms: Date.now() - started };
+    } catch (error) {
+      error.diagnostic ??= { phase: "mobile_observation", outcome: error.outcome ?? "known" };
+      if (attemptId) error.diagnostic.attempt_id ??= attemptId;
+      error.diagnostic.initial_observation_ms = Date.now() - observationStarted;
+      this.client.trace?.("initial_observation", { attemptId, operation: "mobile_observation", started: observationStarted, state: "failed", code: error.code, outcome: error.outcome ?? "known" });
+      try {
+        await this.client.closeSession();
+        this.opened = false;
+      } catch (cleanupError) {
+        error.diagnostic.cleanup = errorDiagnostic(cleanupError, cleanupError.diagnostic ?? { phase: "cleanup", outcome: cleanupError.outcome ?? "known" });
+      }
+      throw error;
+    }
   }
 
   async settle({ quiet = 300, max = 3000 } = {}) {
@@ -94,12 +80,22 @@ export class AppiumAndroidDriver {
     return Date.now() - started;
   }
 
-  async snapshot() {
-    const [source, currentPackage, currentActivity] = await Promise.all([
-      this.client.command("GET", "source"),
-      this.client.command("GET", "appium/device/current_package"),
-      this.client.command("GET", "appium/device/current_activity"),
-    ]);
+  async snapshot({ attemptId, signal: externalSignal } = {}) {
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, this.execution?.signal, externalSignal].filter(Boolean));
+    const requests = [
+      this.client.command("GET", "source", undefined, { attemptId, signal }),
+      this.client.command("GET", "appium/device/current_package", undefined, { attemptId, signal }),
+      this.client.command("GET", "appium/device/current_activity", undefined, { attemptId, signal }),
+    ];
+    let source, currentPackage, currentActivity;
+    try {
+      [source, currentPackage, currentActivity] = await Promise.all(requests);
+    } catch (error) {
+      controller.abort();
+      await Promise.allSettled(requests);
+      throw error;
+    }
     let snapshot = parseAndroidSnapshot(source, { packageName: currentPackage || this.package, activity: currentActivity, maxElements: this.maxElements, maxText: this.maxText });
     if (this.secrets?.size) {
       const native = snapshot.elements.map(element => element._native);
@@ -111,27 +107,30 @@ export class AppiumAndroidDriver {
     snapshot.fingerprint = createHash("sha256").update(semanticState).digest("hex");
     this.currentUrl = snapshot.url;
     this.lastPage = snapshot;
-    return snapshot;
+    return assertObservation(snapshot);
+  }
+
+  actionSpace(page) {
+    return [...new Set([...page.elements.flatMap(element => element.actions), "back", "wait", "none"])];
   }
 
   async fresh(snapshot, action = {}) {
     const current = await this.snapshot();
-    if (snapshot?.fingerprint !== current.fingerprint) return { fresh: false, reason: "page_changed", current };
-    if (action.target == null) return { fresh: true, current };
+    if (snapshot?.url !== current.url || snapshot?.text !== current.text) return assertFreshness({ fresh: false, reason: "page_changed", current });
+    if (action.target == null) return assertFreshness(snapshot?.fingerprint === current.fingerprint ? { fresh: true, current } : { fresh: false, reason: "page_changed", current });
     const element = current.elements.find(candidate => candidate.i === action.target);
-    if (!element) return { fresh: false, reason: "target_missing", current };
+    if (!element) return assertFreshness({ fresh: false, reason: "target_missing", current });
     const previous = snapshot.elements.find(candidate => candidate.i === action.target);
-    if (!previous || previous.label !== element.label || previous.text !== element.text || previous.role !== element.role || JSON.stringify(previous.bounds) !== JSON.stringify(element.bounds) || JSON.stringify(previous.actions) !== JSON.stringify(element.actions)) {
-      return { fresh: false, reason: "target_changed", current };
+    if (!previous || JSON.stringify(previous) !== JSON.stringify(element) || previous._native?.identity !== element._native?.identity) {
+      return assertFreshness({ fresh: false, reason: "target_changed", current });
     }
-    return { fresh: true, current, element };
+    if (snapshot?.fingerprint !== current.fingerprint) return assertFreshness({ fresh: false, reason: "page_changed", current });
+    return assertFreshness({ fresh: true, current, element });
   }
 
   async actOn({ action, element, value, key, destination, acceptDialog = false }) {
     const started = Date.now();
-    if (!["click", "type", "clear", "scroll", "back", "wait"].includes(action)) throw new Error(`Android does not support ${action}`);
-    if (["click", "type", "clear"].includes(action) && element == null) throw new Error(`${action} needs an element`);
-    if (action === "scroll" && value != null && !["up", "down"].includes(value)) throw new Error("scroll value must be up or down");
+    this.validateAction({ tool: action, target: element, value });
     let resolved;
     if (element != null) {
       if (!this.shown) throw new Error("Take a browser_snapshot before acting on element numbers");
@@ -144,15 +143,27 @@ export class AppiumAndroidDriver {
       resolved = page.elements.find(candidate => candidate.actions.includes("scroll"));
       if (!resolved) throw new Error("No scrollable Android container is visible");
     }
-    if (action === "type" && value == null) throw new Error("no value to type");
     this.consumeAction();
-    if (action === "wait") await new Promise(resolve => setTimeout(resolve, 1000));
-    else await performAndroidAction(this.client, resolved, { tool: action, value, direction: value ?? "down" });
-    this.assertExecution();
+    await this.execute({ tool: action, target: element, value }, { element: resolved });
     await this.settle();
     const page = await this.snapshot();
     this.shown = null;
     return { action, element: brief(resolved), ms: Date.now() - started, url: page.url, title: page.title };
+  }
+
+  validateAction({ tool, target, value }) {
+    if (!["click", "type", "clear", "scroll", "back", "wait"].includes(tool)) throw new Error(`Android does not support ${tool}`);
+    if (["click", "type", "clear"].includes(tool) && target == null) throw new Error(`${tool} needs an element`);
+    if (tool === "scroll" && value != null && !["up", "down"].includes(value)) throw new Error("scroll value must be up or down");
+    if (tool === "type" && value == null) throw new Error("no value to type");
+  }
+
+  async execute(action, { element } = {}) {
+    this.validateAction(action);
+    const { tool, value, direction } = action;
+    if (tool === "wait") await new Promise(resolve => setTimeout(resolve, 1000));
+    else await performAndroidAction(this.client, element, { tool, value, direction: direction ?? value ?? "down" });
+    this.assertExecution();
   }
 
   async readValue(element) {
@@ -162,7 +173,7 @@ export class AppiumAndroidDriver {
     return this.client.elementCommand(id, "GET", "text");
   }
 
-  act({ tool, target, ...options }) { return this.actOn({ action: tool, element: target, ...options }); }
+  act(action, freshness) { return this.execute(action, freshness); }
 
   async snapshotText({ diff = false, ...render } = {}) {
     await this.settle();
@@ -200,78 +211,7 @@ export class AppiumAndroidDriver {
     return { url: page.url, title: page.title, question, content: page.text.slice(0, budgetChars), truncated: !!page.truncated || page.text.length > budgetChars };
   }
 
-  async do(goal, { values = {}, maxActions = 10, doneAt = 0.5, minTarget = 0.3, allowIrreversible = false, irreversibleAt = 0.6, log = () => {} } = {}) {
-    const started = Date.now(), calls = this.stats.calls, history = [], rounds = [];
-    this.secrets ??= new Set();
-    for (const [key, value] of Object.entries(values)) if (SECRET_KEY.test(key) && String(value).length) this.secrets.add(String(value));
-    const shownValues = redactValues(values);
-    const targeted = new Set(["click", "type", "clear", "scroll"]);
-    let page = await this.snapshot(), repeated = null, repeatCount = 0, actionsTaken = 0;
-    const result = (status, info) => ({ status, goal, url: page.url, title: page.title, actions: history, rounds,
-      jev_calls: this.stats.calls - calls, ms: Date.now() - started, ...(info ? { info } : {}) });
-    for (let round = 0; round <= maxActions + 10; round++) {
-      this.assertExecution();
-      await this.settle();
-      page = await this.snapshot();
-      this.shown = page;
-      const tools = [...new Set([...page.elements.flatMap(element => element.actions), "back", "wait", "none"])];
-      const actionable = page.elements.filter(element => element.actions.length).slice(0, 240);
-      const task = { goal, history, ...(Object.keys(shownValues).length ? { values: shownValues } : {}) };
-      const questions = {
-        done: { type: "noul", instructions: "Does the Android screen in `page` show that `task.goal` has been achieved, given `task.history`?" },
-        blocked: { type: "noul", instructions: "Does `page` show something that prevents progress toward `task.goal` and cannot be handled by the published Android actions?" },
-        error: { type: "noul", instructions: "Does `page` show an error caused by `task.history`?" },
-        login: { type: "noul", instructions: "Is `page` requiring sign-in before `task.goal` can continue?" },
-        irreversible: { type: "noul", instructions: "Would the next Android action toward `task.goal` have a hard-to-undo external effect such as paying, sending, deleting, granting permission or changing a persistent setting?" },
-        tool: { type: "choice", instructions: "Choose the next Android action toward `task.goal`. Only published actions are available.", criteria: Object.fromEntries(tools.map(tool => [tool, null])) },
-        ...(tools.includes("scroll") ? { direction: { type: "choice", instructions: "If scrolling, which direction reveals progress toward task.goal?", criteria: { down: "Reveal content below", up: "Reveal content above" } } } : {}),
-        ...(actionable.length ? { target: { type: "choice", instructions: "If the action needs an element, choose its `i` from `page.elements`. Its `actions` must include the chosen action.", criteria: Object.fromEntries(actionable.map(element => [String(element.i), null])) } } : {}),
-        ...(Object.keys(shownValues).length ? { value: { type: "choice", instructions: "If the action types text, which `task.values` key supplies it?", criteria: Object.fromEntries(Object.entries(shownValues).map(([key, value]) => [key, String(value).slice(0, 200)])) } } : {}),
-      };
-      const { answers } = await this.call({ page, task }, questions);
-      const doneScore = answers.done?.noul ?? 0;
-      if (doneScore >= doneAt) return { ...result("done"), done_score: doneScore };
-      if (actionsTaken >= maxActions) return result("max_actions", `No completion after ${maxActions} Android actions`);
-      if ((answers.blocked?.noul ?? 0) >= 0.7) return result("blocked");
-      if ((answers.error?.noul ?? 0) >= 0.7) return result("error");
-      if ((answers.login?.noul ?? 0) >= 0.7) return result("needs_login", "Android app requires login; provide credentials or log in manually");
-      const tool = answers.tool?.choice;
-      if (!tools.includes(tool)) return result("error", "Decision backend selected an unpublished Android action");
-      if (tool === "none") return result("stuck");
-      const target = !targeted.has(tool) || answers.target?.choice == null ? null : Number(answers.target.choice);
-      const element = target == null ? null : page.elements.find(candidate => candidate.i === target);
-      if (targeted.has(tool) && (!element || !element.actions.includes(tool) || (answers.target?.probabilities?.[String(target)] ?? 0) < minTarget)) {
-        return result("ambiguous", `Chosen Android target is missing or does not support ${tool}`);
-      }
-      if (["click", "type", "clear", "back"].includes(tool) && !allowIrreversible && !(answers.irreversible?.noul < irreversibleAt)) {
-        return { ...result("needs_confirmation", "Android action needs authorization for this exact goal"), pending: { goal } };
-      }
-      const valueKey = answers.value?.choice;
-      if (tool === "type" && (valueKey == null || values[valueKey] == null)) return result("ambiguous", "Android type action needs one of the supplied values");
-      const record = { round, tool, target, element: brief(element), ...(valueKey && tool === "type" ? { value: valueKey } : {}) };
-      rounds.push(record);
-      const freshness = await this.fresh(page, { target });
-      if (!freshness.fresh) { record.stale = freshness.reason; continue; }
-      const action = { tool, target, value: valueKey == null ? undefined : values[valueKey], direction: tool === "scroll" ? (answers.direction?.choice === "up" ? "up" : "down") : undefined };
-      const signature = `${page.fingerprint}:${tool}:${target}:${valueKey ?? ""}`;
-      repeatCount = signature === repeated ? repeatCount + 1 : 0;
-      repeated = signature;
-      if (repeatCount >= 2) return result("stuck", "Android action is not changing the screen");
-      try {
-        this.consumeAction();
-        actionsTaken++;
-        if (tool === "wait") await new Promise(resolve => setTimeout(resolve, 1000));
-        else await performAndroidAction(this.client, freshness.element, action);
-        const entry = { action: tool, element: brief(element), ...(valueKey && tool === "type" ? { value: valueKey } : {}) };
-        history.push(entry);
-        log(`  r${round}: ${tool} -> #${target ?? "-"} ${record.element}`);
-      } catch (error) {
-        history.push({ action: tool, element: brief(element), error: String(error.message).slice(0, 200) });
-        return { ...result(error.status ?? "error", String(error.message).slice(0, 300)), ...(error.outcome ? { outcome: error.outcome, error: { phase: "mobile_action", code: error.code, outcome: error.outcome } } : {}) };
-      }
-    }
-    return result("max_actions");
-  }
+  do(goal, options = {}) { return this.goalRunner.run(goal, options); }
 
   capabilities() { return this._capabilities; }
   async close() {

@@ -1,11 +1,12 @@
 import { errorDiagnostic, stoppedInfo, actionFailures } from "./diagnostics.mjs";
+import { openAutomationTarget } from "./drivers/contract.mjs";
 
 // Successful steps stay inside the MCP process; return at completion or a problem.
 export async function runPlan(b, steps, { url, app, log = () => {}, onProgress = () => {} } = {}) {
   const started = Date.now(), calls = b.stats.calls;
   let completed = 0, current = 0, phase = url || app ? "navigation" : "step";
   const summary = () => ({ completed, total: steps.length, remaining: steps.length - completed,
-    decision_calls: b.stats.calls - calls, ms: Date.now() - started, url: b.currentUrl ?? b.page?.url() ?? null });
+    decision_calls: b.stats.calls - calls, ms: Date.now() - started, url: b.currentUrl ?? null });
   const failed = result => ({ ...summary(), status: result.status, phase, failed_step: current + 1, goal: steps[current]?.goal,
     info: stoppedInfo(result), ...actionFailures(result),
     resume: "Inspect the failure and current page, then resume the failed step and remaining tail only. Completed effects are not rolled back.",
@@ -13,7 +14,7 @@ export async function runPlan(b, steps, { url, app, log = () => {}, onProgress =
   try {
     onProgress({ ...summary(), phase, step: 1, goal: steps[0]?.goal });
     if (url && app) throw new Error("Provide url or app, never both");
-    if (url || app) await b.open(app ?? url);
+    if (url || app) await openAutomationTarget(b, { url, app });
     for (const [i, step] of steps.entries()) {
       current = i;
       phase = "step";
@@ -34,8 +35,8 @@ export async function runPlan(b, steps, { url, app, log = () => {}, onProgress =
     }
     return { status: "done", ...summary() };
   } catch (error) {
-    const diagnostic = errorDiagnostic(error, { phase });
-    return failed({ status: error.status ?? "error", info: diagnostic.message, error: diagnostic });
+    const diagnostic = errorDiagnostic(error, { phase, ...error.diagnostic });
+    return failed({ status: error.status ?? "error", info: diagnostic.message, error: diagnostic, ...(error.outcome ? { outcome: error.outcome } : {}) });
   }
 }
 
@@ -60,7 +61,7 @@ export async function verificationFailures(b, step, downloadBaseline = "") {
   if (spec.field) {
     const { label, value_key } = spec.field;
     const element = page.elements.find(e => (e.label || e.placeholder || e.name) === label);
-    const actual = element ? await (b.readValue ? b.readValue(element) : b.locate(element.i).inputValue()).catch(() => null) : null;
+    const actual = element ? await b.readValue(element, page).catch(() => null) : null;
     checks.field = step.values?.[value_key] !== undefined && actual === step.values[value_key];
   }
   if (spec.download) {

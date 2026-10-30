@@ -10,11 +10,16 @@ const serverPath = fileURLToPath(new URL("../bin/laya-browser-mcp.mjs", import.m
 const xml = `<hierarchy><node class="android.widget.TextView" text="About phone" bounds="[0,20][300,90]" visible-to-user="true" enabled="true" clickable="true" checked="false" selected="false"/></hierarchy>`;
 
 test("MCP Android target opens, observes, gates web capabilities and owns device/session", { timeout: 30000 }, async () => {
-  const calls = [];
+  const calls = [], creations = [];
   const appium = createServer(async (req, res) => {
     calls.push(`${req.method} ${req.url}`);
+    let body = "";
+    for await (const chunk of req) body += chunk;
     res.setHeader("content-type", "application/json");
-    if (req.method === "POST" && req.url === "/session") return res.end(JSON.stringify({ value: { sessionId: "android-test-1", capabilities: {} } }));
+    if (req.method === "POST" && req.url === "/session") {
+      creations.push(JSON.parse(body));
+      return res.end(JSON.stringify({ value: { sessionId: "android-test-1", capabilities: {} } }));
+    }
     if (req.method === "GET" && req.url === "/session/android-test-1/source") return res.end(JSON.stringify({ value: xml }));
     if (req.method === "GET" && req.url === "/session/android-test-1/appium/device/current_package") return res.end(JSON.stringify({ value: "com.android.settings" }));
     if (req.method === "GET" && req.url === "/session/android-test-1/appium/device/current_activity") return res.end(JSON.stringify({ value: ".Settings" }));
@@ -37,7 +42,7 @@ test("MCP Android target opens, observes, gates web capabilities and owns device
   };
   const target = {
     kind: "android", appium_url: appiumUrl,
-    capabilities: { platformName: "Android", "appium:automationName": "UiAutomator2", "appium:udid": "emulator-test", "appium:noReset": true },
+    capabilities: { platformName: "Android", "appium:automationName": "UiAutomator2", "appium:udid": "emulator-test", "appium:noReset": true, "appium:appWaitActivity": "*", "appium:newCommandTimeout": 600 },
   };
   try {
     const created = await call("browser_create_session", { session_id: "android-contract", target });
@@ -70,6 +75,11 @@ test("MCP Android target opens, observes, gates web capabilities and owns device
     const code = await call("browser_execute", { session_id: "android-second", code: "const opened = await browser.open({app:{package:'com.android.settings',activity:'.Settings'}}); const snapshot = await browser.snapshot({}); return {opened,snapshot};" });
     assert.equal(code.status, "done", code.info);
     assert.match(code.result.snapshot.text, /About phone/);
+    assert.equal(creations.length, 2);
+    for (const creation of creations) {
+      assert.equal(creation.capabilities.alwaysMatch["appium:appWaitActivity"], "*");
+      assert.equal(creation.capabilities.alwaysMatch["appium:newCommandTimeout"], 600);
+    }
     const gated = await call("browser_execute", { session_id: "android-second", code: "return await browser.getHtml({});" });
     assert.equal(gated.status, "error");
     assert.match(gated.info, /unsupported capability: dom/);

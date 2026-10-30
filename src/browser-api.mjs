@@ -4,7 +4,7 @@ import { runPlan, verificationFailures } from "./plan.mjs";
 import { stoppedInfo, actionFailures } from "./diagnostics.mjs";
 import { RESOURCE_TYPES } from "./network.mjs";
 import { BOX_ACTIONS } from "./vision.mjs";
-import { assertCapability } from "./drivers/contract.mjs";
+import { assertCapability, openAutomationTarget } from "./drivers/contract.mjs";
 
 export const valuesSchema = z.record(z.string(), z.string());
 export const appSchema = z.object({ package: z.string().min(1), activity: z.string().min(1).optional() }).strict();
@@ -107,15 +107,21 @@ const METHOD_CAPABILITIES = {
   downloads: "downloads", waitForDownload: "downloads",
   listNetworkRequests: "network", getNetworkRequest: "network",
   box: "vision", actBox: "vision",
+  screenshot: "vision", webmcpTools: "dom", webmcpCall: "dom",
 };
+
+export function assertOperationCapability(driver, method) {
+  const capability = METHOD_CAPABILITIES[method];
+  if (capability) assertCapability(driver.capabilities?.() ?? { [capability]: true }, capability);
+}
 
 export async function invokeBrowser(b, method, input, { authorizedGoals = [], log = () => {}, onProgress } = {}) {
   if (!Object.hasOwn(codeSchemas, method)) throw new Error(`Unknown browser method: ${method}`);
-  if (METHOD_CAPABILITIES[method]) assertCapability(b.capabilities?.() ?? { [METHOD_CAPABILITIES[method]]: true }, METHOD_CAPABILITIES[method]);
+  assertOperationCapability(b, method);
   const args = codeSchemas[method].parse(input);
   const authorize = step => ({ ...step, allow_irreversible: authorizedGoals.includes(step.goal) });
   switch (method) {
-    case "open": return { status: "done", ...await b.open(args.app ?? args.url) };
+    case "open": return { status: "done", ...await openAutomationTarget(b, args) };
     case "do": return compactGoal(await doStep(b, authorize(args), { log }));
     case "run": return runPlan(b, args.steps.map(authorize), { url: args.url, app: args.app, log, onProgress });
     case "check": return { p_yes: await b.check(args.question, { visual: args.visual }) };
@@ -124,7 +130,7 @@ export async function invokeBrowser(b, method, input, { authorizedGoals = [], lo
     case "actBox": return b.actBox({ ...args, allowIrreversible: authorizedGoals.includes(args.goal) });
     case "read": return b.read(args.question, args.max_chars ? { budgetChars: args.max_chars } : {});
     case "snapshot": return { text: await b.snapshotText({ diff: args.diff, interactive: args.interactive, filter: args.filter, urls: args.urls, maxChars: args.max_chars }) };
-    case "getHtml": return { url: b.page.url(), html: await b.page.content() };
+    case "getHtml": return b.getHtml();
     case "listTabs": return b.listTabs();
     case "newTab": return b.newTab(args);
     case "selectTab": return b.selectTab(args);
@@ -140,7 +146,7 @@ export async function invokeBrowser(b, method, input, { authorizedGoals = [], lo
 
 // Kept with the schemas so clients can discover the complete, small code surface.
 export const CODE_API_TYPES = `
-type Status = "done" | "likely_done" | "needs_login" | "needs_confirmation" | "ambiguous" | "blocked" | "stuck" | "max_actions" | "error" | "verification_failed";
+type Status = "done" | "likely_done" | "needs_login" | "needs_confirmation" | "ambiguous" | "blocked" | "stuck" | "max_actions" | "error" | "verification_failed" | "limit_exceeded" | "cancelled" | "timeout";
 interface Verify {
   url_includes?: string; text_includes?: string;
   app_package?: string; activity_includes?: string;
@@ -149,7 +155,7 @@ interface Verify {
   download?: { filename?: string; timeout_ms?: number };
 }
 interface Step { goal: string; values?: Record<string, string>; max_actions?: number; verify?: Verify }
-interface GoalResult { status: Status; goal: string; url: string; done_score: number; decision_calls: number; info?: string }
+interface GoalResult { status: Status; goal: string; url: string; done_score?: number; decision_calls: number; info?: string; outcome?: "unknown"; error?: Diagnostic }
 interface Diagnostic { phase?: string; name: string; message: string; code?: string; hint?: string }
 interface PlanResult { status: Status; completed: number; total: number; remaining: number; failed_step?: number; url: string | null; phase?: "navigation" | "step" | "verification"; info?: string; error?: Diagnostic; verification_failures?: string[]; action_errors?: { action: string; element?: string; error: string }[]; resume?: string }
 interface Download { id: string; filename: string; status: string; path?: string }

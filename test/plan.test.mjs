@@ -4,11 +4,11 @@ import { runPlan } from "../src/plan.mjs";
 
 const fake = statuses => {
   const invoked = [];
-  const b = { stats: { calls: 0 }, page: { url: () => "https://example.test/home" },
+  const b = { stats: { calls: 0 }, currentUrl: "https://example.test/home",
     open: async url => { invoked.push(["open", url]); },
     do: async (goal, options) => { invoked.push([goal, options]); b.stats.calls++; return { status: statuses.shift(), pending: { action: "click" } }; },
     settle: async () => {}, snapshot: async () => ({ url: "https://example.test/home", text: "Ready", elements: [{ i: 7, label: "Email" }] }),
-    locate: () => ({ inputValue: async () => "test@example.org" }) };
+    readValue: async () => "test@example.org" };
   return { b, invoked };
 };
 test("plan executes ordered steps and forwards per-step options", async () => {
@@ -61,6 +61,22 @@ test("navigation failure preserves multiline driver details and nested network c
   assert.equal(invoked.length, 0);
   assert.match(r.error.message, /Call log:[\s\S]*ECONNREFUSED/);
   assert.match(r.error.hint, /network/);
+});
+
+test("navigation failure preserves Appium phase and unknown outcome without running dependents", async () => {
+  const { b, invoked } = fake([]);
+  b.capabilities = () => ({ native: true });
+  b.open = async () => { throw Object.assign(new Error("Appium POST timed out"), {
+    code: "appium_timeout", outcome: "unknown",
+    diagnostic: { phase: "session_create", transport_phase: "http_body", outcome: "unknown", attempt_id: "attempt-1" },
+  }); };
+  const r = await runPlan(b, [{ goal: "must not login" }, { goal: "must not select a plan" }], { app: { package: "com.demo" } });
+  assert.equal(r.phase, "navigation");
+  assert.equal(r.outcome, "unknown");
+  assert.equal(r.error.phase, "session_create");
+  assert.equal(r.error.transport_phase, "http_body");
+  assert.equal(r.error.attempt_id, "attempt-1");
+  assert.equal(invoked.length, 0);
 });
 
 test("stopped plans explain exhausted actions and preserve the last action failures", async () => {

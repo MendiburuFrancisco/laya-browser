@@ -54,6 +54,11 @@ métodos `browser.*`. El programa completo queda vinculado a esa sesión.
 - Presupuestos: `timeout_ms`, `max_operations`, `max_decision_calls`,
   `max_browser_actions`, `max_output_chars`.
 
+El presupuesto predeterminado de Code Mode es 120000 ms. La creación Appium
+conserva su límite de 90000 ms; un `timeout_ms` explícito menor puede cancelarla
+antes. Una creación abortada después del envío puede quedar con resultado
+desconocido y no debe repetirse automáticamente.
+
 El sandbox no ofrece Node, imports, filesystem, red general, `fetch`, `console`,
 Playwright ni ejecución arbitraria de JavaScript en el DOM. Devuelve solo los datos
 necesarios. Espera todas las llamadas; `Promise.all` también se serializa dentro

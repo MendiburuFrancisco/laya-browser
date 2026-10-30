@@ -365,6 +365,7 @@ test("dialogs: confirm is dismissed by default and accepted only when asked", as
 
 test("dialogs: do() hands back a confirm that Jev rates irreversible, and fails safe without Jev", async () => {
   const b2 = await JevBrowser.launch({ browser });
+  b2.cache = null;
   await b2.page.setContent(`<button onclick="document.body.dataset.c = confirm('Permanently delete 3 files?')">Delete files</button>`);
   const i = (await b2.snapshot()).elements[0].i;
   b2.decide = async () => clickAnswers(i);

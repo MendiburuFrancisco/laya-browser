@@ -11,6 +11,9 @@
 // an option to select, or a stricter "is it done" when the answers disagree.
 import { chromium } from "playwright";
 import { WEB_CAPABILITIES } from "./drivers/contract.mjs";
+import { PlaywrightDriver } from "./drivers/playwright-driver.mjs";
+import { GoalRunner, callDecision, assertExecution as assertDriverExecution, consumeAction, redactState } from "./goal-runner.mjs";
+import { WebGoalStrategy } from "./goal-strategies/web.mjs";
 import { DownloadManager, defaultDownloadsDir } from "./downloads.mjs";
 import { NetworkLog } from "./network.mjs";
 import { VideoManager } from "./videos.mjs";
@@ -18,8 +21,8 @@ import { jev, BACKEND } from "./jev.mjs";
 import { randomUUID } from "node:crypto";
 import { BOX_ACTIONS, prepareImage, boxPoint, boxQuestions, validBox, imageThresholds } from "./vision.mjs";
 import { ENUMERATE, TRACK_INTERACTIONS, EXTRACT_BLOCKS } from "./page-script.mjs";
-import { LocatorCache, cacheKey } from "./locator-cache.mjs";
-import { FIELDISH, SELECTISH, FILEISH, brief, pickCloser, pageDiff, repeatedElements, formatPage, formatDiff, redactPage, redactValues, SECRET_KEY, REDACTED } from "./page-model.mjs";
+import { LocatorCache } from "./locator-cache.mjs";
+import { FIELDISH, SELECTISH, FILEISH, brief, pageDiff, repeatedElements, formatPage, formatDiff, redactPage, redactValues } from "./page-model.mjs";
 import { WEBMCP_INIT, webmcpText } from "./webmcp.mjs";
 import { normalizeBlocks, batchBlocks, batchQuestions, pickBlocks, readResult, totalChars, MIN_PRUNE_CHARS, BUDGET_CHARS, DROP_BELOW, MAX_JEV_CALLS } from "./prune.mjs";
 
@@ -52,12 +55,8 @@ export const WEBMCP_ACTION = "Call one of the page's own agent tools in `page.we
 // `back` is not offered to Jev (it proposed it after successful steps); callers can still use it via act().
 export const KEYS = ["Escape", "Tab", "Space", "Backspace", "Delete", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End"];
 const TARGETED = new Set(["click", "type", "clear", "press_enter", "select", "hover", "right_click", "drag", "upload"]);
-const GUARDED = new Set(["click", "press_enter", "press_key"]);
-// a page tool can change anything the page can, unless the site marks it read-only
-const guarded = act => GUARDED.has(act.tool) || (act.tool === "webmcp" && !act.readOnly);
 const ARG_SKIP = "(leave out)";
 const MAX_INLINE_ARGS = 24;   // argument questions carried in the decide() request
-const actLabel = act => act.boxId ? `box ${act.boxId}` : act.tool === "webmcp" ? `tool ${act.webmcp}` : brief(act.el);
 // In-page helpers for scroll(). A box scrolls if its overflow allows it and its content is taller.
 const SCROLL_BOX_MAIN = () => {
   const scrolls = el => /(auto|scroll|overlay)/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight + 1;
@@ -128,6 +127,18 @@ export function browserOptions(use) {
 
 export class JevBrowser {
   capabilities() { return WEB_CAPABILITIES; }
+  actionSpace() { return Object.keys(TOOLS); }
+  get currentUrl() { return this.page?.url() ?? null; }
+  readValue(element, observation) {
+    this.driver ??= new PlaywrightDriver(this);
+    return this.driver.readValue(element, observation);
+  }
+  getHtml() {
+    this.driver ??= new PlaywrightDriver(this);
+    return this.driver.getHtml();
+  }
+  viewportSize() { return this.page.viewportSize(); }
+  interrupt() { return this.context.close(); }
   // userDataDir -> persistent profile (logins survive restarts); browser -> share one Chromium.
   // highlight -> outline each target with Jev's decision before acting (for watching a headed run).
   // use -> an installed browser channel or executable path (default JEV_BROWSER).
@@ -365,19 +376,11 @@ export class JevBrowser {
   }
 
   async call(state, questions, options = {}) {
-    this.assertExecution();
-    if (this.execution && this.execution.remainingCalls-- <= 0) {
-      this.execution.error = Object.assign(new Error("Decision call budget exhausted"), { status: "limit_exceeded" });
-      throw this.execution.error;
-    }
-    const r = await this.ask(this.redact(state), questions, { ...options, signal: this.execution?.signal });
-    this.stats.calls++; this.stats.jev_ms += r.ms; this.stats.tokens += r.tokens;
-    return r;
+    return callDecision(this, state, questions, options);
   }
 
   assertExecution() {
-    this.execution?.signal?.throwIfAborted();
-    if (this.execution?.error) throw this.execution.error;
+    assertDriverExecution(this);
   }
 
   ask(state, questions, options) { return jev(state, questions, options); }
@@ -385,11 +388,7 @@ export class JevBrowser {
   // Secret fields show as [redacted], and a secret value given to do() is cut from anything the
   // page echoes back (its text, a diff, a page tool's result) before the request leaves.
   redact(state) {
-    if (state.page) state = { ...state, page: redactPage(state.page) };
-    if (!this.secrets?.size) return state;
-    let json = JSON.stringify(state);
-    for (const v of this.secrets) json = json.split(JSON.stringify(v).slice(1, -1)).join(REDACTED);
-    return JSON.parse(json);
+    return redactState(this, state);
   }
 
   // Yes/no question about the current page -> probability.
@@ -726,15 +725,18 @@ export class JevBrowser {
   // act = { tool, target?, value?, key?, destination? }
   async act(act) {
     this.assertExecution();
-    if (this.execution && this.execution.remainingActions-- <= 0) {
-      this.execution.error = Object.assign(new Error("Browser action budget exhausted"), { status: "limit_exceeded" });
-      throw this.execution.error;
-    }
+    const boxTarget = act.boxId ? await this.freshBox(act.boxId) : undefined;
+    consumeAction(this);
+    return this.execute(act, { boxTarget });
+  }
+
+  async execute(act, { boxTarget } = {}) {
     const t = Date.now();
     if (act.boxId) {
       if (!BOX_ACTIONS.includes(act.tool)) throw new Error(`Box does not support ${act.tool}`);
       if (act.tool === "type" && act.value == null) throw new Error("no value to type");
-      const { point } = await this.freshBox(act.boxId);
+      if (!boxTarget) throw new Error("Box execution requires a fresh visual target");
+      const { point } = boxTarget;
       this.visualTargets.delete(act.boxId);
       if (act.tool === "hover") await this.page.mouse.move(point.x, point.y);
       else {
@@ -764,7 +766,7 @@ export class JevBrowser {
         if (v.length <= 120) await loc.pressSequentially(v, { delay: 5, ...o }); else await loc.fill(v, o);
         const got = await loc.inputValue({ timeout: 1000 }).catch(() => null);
         this.assertExecution();
-        if (got !== null && got !== v) await loc.fill(v, o);
+        if (got !== null && got !== v) throw Object.assign(new Error("Typed field did not retain the requested value"), { outcome: "unknown", code: "web_action_outcome_unknown" });
         break;
       }
       case "press_enter": await loc.press("Enter", o); break;
@@ -775,7 +777,10 @@ export class JevBrowser {
       }
       case "select": {
         const v = String(act.value ?? "");
-        await loc.selectOption({ label: v }, o).catch(() => loc.selectOption(v, o));
+        const byLabel = await loc.evaluate((element, value) => [...element.options].some(option => option.label === value), v, o);
+        this.assertExecution();
+        try { await loc.selectOption(byLabel ? { label: v } : v, o); }
+        catch (error) { error.outcome ??= "unknown"; throw error; }
         break;
       }
       case "hover": await loc.hover(o); break;
@@ -795,7 +800,7 @@ export class JevBrowser {
       case "none": break;
       case "webmcp": {
         const r = await this.runWebmcp(act.webmcp, act.args ?? {});
-        if (r.error) throw new Error(`page tool ${act.webmcp}: ${r.error}`);
+        if (r.error) throw Object.assign(new Error(`page tool ${act.webmcp}: ${r.error}`), { outcome: "unknown", code: "webmcp_outcome_unknown" });
         act.result = webmcpText(r.result, 300);
         break;
       }
@@ -904,219 +909,10 @@ export class JevBrowser {
     };
   }
 
-  async runGoal(goal, { values = {}, maxActions = 10, doneAt = 0.5, minTarget = 0.3, allowIrreversible = false, irreversibleAt = 0.6, log = () => {} } = {}) {
-    const t0 = Date.now(); const calls0 = this.stats.calls;
-    this.secrets ??= new Set();
-    for (const [k, v] of Object.entries(values)) if (SECRET_KEY.test(k) && String(v).length >= 4) this.secrets.add(String(v));
-    const history = []; const rounds = [];
-    let prevPage = null, waits = 0, page = null, status = "max_actions", info, pending, retried = false;
-    let cacheHits = 0, cacheSaved = 0;
-    const seen = new Map(), dismissed = new Map();   // url -> dismiss attempts
-    this.promptText = values.prompt;
-    for (let round = 0; round <= maxActions; round++) {
-      this.assertExecution();
-      await this.settle();
-      page = await this.snapshot();
-      if (this.events.length) history.push(...this.events.splice(0).map(e => ({ event: e })));
-
-      // Cache fast path: a persisted decision for (goal, url, round) replays without a Jev
-      // call. Validated against the fresh snapshot: the stored XPath must map to exactly one
-      // enumerated element in the same frame, with the same brief, and any value it types
-      // must be available. On mismatch the entry is evicted and Jev decides (self-healing).
-      const ck = this.cache && round < maxActions ? cacheKey(goal, page.url, round) : null;
-      const cached = ck ? this.cache.get(ck) : null;
-      if (cached) {
-        const el = page.elements.find(e => e.xpath && e.xpath === cached.xpath && (e.frame ?? null) === (cached.frame ?? null));
-        const briefOk = el && brief(el) === cached.brief;
-        const needsValue = ["type", "upload"].includes(cached.tool);
-        const valueOk = !needsValue || (cached.valueKey != null && values[cached.valueKey] != null);
-        if (el && briefOk && valueOk) {
-          const act = { tool: cached.tool, target: el.i, el, valueKey: cached.valueKey, value: cached.valueKey != null ? values[cached.valueKey] : cached.option, p_tool: 1, p_target: 1, candidates: [] };
-          const r = { round, cached: true, tool: act.tool, p_tool: 1, target: act.target, p_target: 1, el: brief(act.el), value: act.valueKey, elements: page.elements.length };
-          rounds.push(r); cacheHits++;
-          log(`  r${round}: [cache] ${act.tool} -> #${act.target} ${r.el}${act.valueKey ? ` value=${act.valueKey}` : ""}`);
-          const h = { action: act.tool, element: brief(act.el) };
-          if (act.valueKey && ["type", "select", "upload"].includes(act.tool)) h.value = act.valueKey;
-          if (act.tool === "select" && act.value != null) h.option = act.value;
-          if (this.highlight && act.target != null) await this.showDecision(act, r).catch(() => {});
-          try { r.act_ms = await this.act(act); }
-          catch (e) { h.error = actionError(e); r.error = h.error; this.cache.evict(ck); log(`  ! ${h.error} (cache entry evicted)`); }
-          history.push(h);
-          if (this.heldDialog) {
-            this.cache.evict(ck);
-            status = "needs_confirmation"; info = "the cached action opened a confirmation dialog that looks hard to undo, so it was dismissed; call again with allow_irreversible to accept it";
-            pending = { action: h.action, element: h.element, dialog: this.heldDialog.message, p_irreversible: this.heldDialog.p_irreversible };
-            break;
-          }
-          prevPage = page;
-          continue;
-        }
-        this.cache.evict(ck);
-      }
-
-      const webmcp = await this.webmcpTools();
-      const change = round ? pageDiff(redactPage(prevPage), redactPage(page)) : undefined;
-      let a = await this.decide(page, goal, values, history.slice(-12), change, webmcp);
-      let act = this.resolve(page, a, values, webmcp), image;
-      if (BACKEND === "jev" && (a.needs_visual?.noul >= 0.5 ||
-          (Math.max(a.done.noul, a.done_change?.noul ?? 0) < doneAt && (act.tool === "none" || (TARGETED.has(act.tool) && (!act.el || act.p_target < minTarget)) || history.at(-1)?.error)))) {
-        image = await this.captureVision();
-        a = await this.decide(page, goal, values, history.slice(-12), change, webmcp, image);
-        act = this.resolve(page, a, values, webmcp);
-        if (act.tool !== "webmcp" && a.visual_target?.choice === "box" && BOX_ACTIONS.includes(a.tool.choice)) {
-          const found = this.rememberBox(a.box, a.visible?.noul, image, goal);
-          act = { ...act, tool: a.tool.choice === "type" && act.value == null ? "click" : a.tool.choice, target: null, el: undefined, boxId: found.box_id, p_target: found.status === "done" ? found.confidence : 0, candidates: [] };
-        }
-      }
-      prevPage = page;
-      const done = Math.max(a.done.noul, a.done_change?.noul ?? 0);
-      const r = {
-        round, done: +done.toFixed(2), done_plain: +a.done.noul.toFixed(2), done_change: +(a.done_change?.noul ?? 0).toFixed(2),
-        blocked: +a.blocked.noul.toFixed(2), error_shown: +a.error.noul.toFixed(2), login: +a.login.noul.toFixed(2), irreversible: +a.irreversible.noul.toFixed(2),
-        tool: act.tool, p_tool: +act.p_tool.toFixed(2), target: act.target, p_target: +act.p_target.toFixed(2), el: actLabel(act),
-        value: act.valueKey, elements: page.elements.length, stages: a.stages, candidates: act.candidates,
-        ...(image ? { visual: true, ...(act.boxId ? { box: a.box.box, box_id: act.boxId } : {}) } : {}),
-      };
-      rounds.push(r);
-      log(`  r${round}: ${act.tool}(${r.p_tool}) -> ${act.target != null ? `#${act.target} ` : ""}${r.el} (${r.p_target})${act.valueKey ? ` value=${act.valueKey}` : ""}  done=${r.done} err=${r.error_shown} login=${r.login} irrev=${r.irreversible}${a.use_tool ? ` use_tool=${a.use_tool.noul.toFixed(2)}` : ""}  [${page.elements.length} els${a.stages === 2 ? ", 2-stage" : ""}]`);
-
-      if (round > 0 ? done >= doneAt && done < 0.85 && act.tool !== "none" : done >= 0.9) {
-        // "done" and "next action" disagree: settle it with a stricter single question. In round 0
-        // nothing has been done yet, so any "done" is checked (labels like a "Done" button mislead it).
-        const c = await this.call({ page, task: { goal, history: history.slice(-12) }, ...(image ? { screenshot: image.ref } : {}) }, { complete: { type: "noul", instructions: "Is everything `task.goal` asks for already finished on `page`, so that no further action (such as pressing a submit, search or continue button) is needed?" + (image ? " Also judge the visible pixels in `screenshot`." : "") } }, image ? { assets: image.assets } : {});
-        r.confirm = +c.answers.complete.noul.toFixed(2);
-        log(`     confirm=${r.confirm}`);
-        if (r.confirm >= 0.65) { status = "done"; break; }
-        if (r.confirm >= 0.45) { status = "likely_done"; info = "the page looks done but Jev is unsure; verify with a check, snapshot or screenshot"; break; }
-        if (act.tool === "none" && a.use_tool?.noul >= 0.5) {
-          // not done after all, and a page tool fits the next step: use it
-          Object.assign(act, this.resolve(page, { ...a, tool: { ...a.tool, choice: "webmcp" } }, values, webmcp));
-          r.tool = act.tool; r.el = actLabel(act);
-        }
-        if (a.irreversible.noul >= irreversibleAt && guarded(act)) {
-          // the goal looks mostly done and the next step is hard to undo: stop rather than overstep
-          status = "done"; info = "stopped before an action that looks irreversible and may go beyond this goal";
-          pending = { action: act.tool, element: actLabel(act), p_irreversible: r.irreversible };
-          break;
-        }
-      } else if (done >= (round > 0 ? doneAt : 0.9) && (done >= 0.85 || act.tool === "none" || round === 0)) { status = "done"; break; }
-      if (round === maxActions) break;
-      if (a.login.noul >= 0.7 && !Object.keys(values).length) {
-        // no credentials to type: hand back instead of clicking through sign-in (incl. third-party SSO)
-        status = "needs_login"; info = "the page wants a sign-in and no values were given; log in (e.g. in a headed persistent profile) or pass credentials in values"; break;
-      }
-      if (round > 0 && a.error.noul >= 0.7) { status = "error"; info = "the page shows an error after the last action"; break; }
-      if (act.tool === "none" && round === 0 && !retried) {
-        // content that appears after a delay (modals, late renders): look once more before giving up
-        retried = true; await sleep(1500); round--; rounds.pop(); continue;
-      }
-      if (act.tool === "none" && round > 0 && done >= 0.35 && a.error.noul < 0.5 && a.blocked.noul < 0.5) {
-        // Jev sees nothing left to do after acting, but "done" is soft: let the caller verify
-        status = "likely_done"; info = "no further action seems needed but Jev is unsure the goal is met; verify with a check, snapshot or screenshot"; break;
-      }
-      if (act.tool === "none") { status = a.blocked.noul >= 0.5 ? "blocked" : "stuck"; break; }
-      if (a.blocked.noul >= 0.85) { status = "blocked"; break; }
-      if (act.tool === "wait") {
-        if (++waits > 6) { status = "stuck"; info = "page never finished loading"; break; }
-        await this.settle({ max: 4000 }); await sleep(600); history.push({ action: "wait" }); continue;
-      }
-      if ((TARGETED.has(act.tool) || act.tool === "webmcp") && act.p_target < minTarget) { status = "ambiguous"; info = "target confidence too low; refine the goal or act on a candidate directly"; break; }
-      const seenKey = `${act.tool}|${actLabel(act)}|${["type", "select", "upload"].includes(act.tool) ? act.valueKey : ""}|${page.url}|${page.text}|${JSON.stringify(page.elements)}`;
-      seen.set(seenKey, (seen.get(seenKey) ?? 0) + 1);
-      if (seen.get(seenKey) >= 3) { status = "stuck"; info = "repeating the same action on the same page without progress"; break; }
-      const seq = [...history.filter(h => h.action).map(h => `${h.action}|${h.element}|${h.value ?? ""}`), `${act.tool}|${actLabel(act)}|${["type", "select", "upload"].includes(act.tool) ? act.valueKey ?? "" : ""}`];
-      if (repeatsBlock(seq, 2, 3) || repeatsBlock(seq, 3, 3) || repeatsBlock(seq, 1, 8)) { status = "stuck"; info = "repeating the same sequence of actions; the goal may already be done — check the page"; break; }
-
-      // follow-up questions only for the chosen action
-      if (act.tool === "select" && act.value == null && act.el?.options?.length) {
-        const { answers } = await this.call({ page, task: { goal }, dropdown: act.el }, { opt: { type: "choice", instructions: "Which option of `dropdown.options` should be chosen for `task.goal`?", criteria: Object.fromEntries(act.el.options.map(o => [o, null])) } });
-        act.value = answers.opt.choice; act.valueKey = undefined;
-      }
-      if (act.tool === "press_key") {
-        const { answers } = await this.call({ page: { url: page.url, title: page.title, text: page.text, dialogs: page.dialogs }, task: { goal, history: history.slice(-6) } }, { key: { type: "choice", instructions: "Which keyboard key should be pressed next for `task.goal`?", criteria: Object.fromEntries(KEYS.map(k => [k, null])) } });
-        act.key = answers.key.choice;
-        const tgt = act.el; if (!tgt || !(FIELDISH(tgt) || tgt.tag.startsWith("input"))) act.target = null;   // page-level key press
-      }
-      if (act.tool === "drag") {
-        const others = page.elements.filter(e => e.i !== act.target).slice(0, MAX_SINGLE);
-        if (!others.length) { status = "stuck"; info = "nothing on the page to drop onto"; break; }
-        const { answers } = await this.call({ page: { ...page, elements: others }, task: { goal, dragging: brief(act.el) } }, { dest: { type: "choice", instructions: "Onto which entry of `page.elements` (by its `i`) should `task.dragging` be dropped for `task.goal`?", criteria: Object.fromEntries(others.map(e => [String(e.i), null])) } });
-        act.destination = +answers.dest.choice;
-        r.destination = brief(page.elements.find(e => e.i === act.destination));
-      }
-      if (act.tool === "webmcp" && !act.args) act.args = await this.webmcpArgs(page, goal, history.slice(-12), act, values);
-      if (guarded(act) && !allowIrreversible && a.irreversible.noul >= irreversibleAt) {
-        status = "needs_confirmation"; info = "the next action looks hard to undo; call again with allow_irreversible to proceed";
-        pending = { action: act.tool, element: actLabel(act), ...(act.argKeys ? { args: act.argKeys } : {}), ...(act.key ? { key: act.key } : {}), p_irreversible: r.irreversible };
-        break;
-      }
-
-      const h = { action: act.tool, element: actLabel(act) };
-      if (act.argKeys && Object.keys(act.argKeys).length) h.args = act.argKeys;
-      if (act.tool === "select" && act.value != null) h.option = act.value;
-      if (act.valueKey && ["type", "select", "upload"].includes(act.tool)) h.value = act.valueKey;
-      if (act.key) h.key = act.key;
-      if (r.destination) h.destination = r.destination;
-      if (this.highlight && act.target != null) await this.showDecision(act, r).catch(() => {});
-      try { r.act_ms = await this.act(act); if (act.result != null) h.result = act.result; }
-      catch (e) { h.error = actionError(e); r.error = h.error; log(`  ! ${h.error}`); }
-      history.push(h);
-      // Persist this decision so the next run of the same goal replays it without Jev.
-      // Irreversible actions are never cached (Jev re-checks them each run) and neither
-      // are secrets: only the valueKey name is stored, never the value.
-      if (this.cache && ck && !h.error && !this.heldDialog && act.el?.xpath
-          && ["click", "type", "press_enter", "select", "hover", "right_click", "upload"].includes(act.tool)
-          && (a.irreversible?.noul ?? 0) < irreversibleAt) {
-        this.cache.put(ck, {
-          tool: act.tool, xpath: act.el.xpath, frame: act.el.frame ?? null, brief: brief(act.el),
-          ...(act.valueKey && ["type", "select", "upload"].includes(act.tool) ? { valueKey: act.valueKey } : {}),
-          ...(act.tool === "select" && act.value != null ? { option: act.value } : {}),
-        });
-        cacheSaved++;
-      }
-      // A modal/banner covers the target: if an uncovered control plainly says "close", dismiss it
-      // so the next round can retry (Jev keeps picking the covered target otherwise). At most two
-      // attempts per URL; if the target is still covered afterwards, say so in the history.
-      if (h.error?.startsWith("click blocked") && (dismissed.get(page.url) ?? 0) < 2) {
-        // re-read the page: the overlay often appeared after the snapshot this round decided on
-        const now = await this.snapshot().catch(() => null);
-        const closer = now && pickCloser(now.elements, now.url);
-        if (closer) {
-          dismissed.set(now.url, (dismissed.get(now.url) ?? 0) + 1);
-          const d = { action: "dismiss_overlay", element: `${closer.tag} "${String(closer.text || closer.label || closer.hint).slice(0, 50)}"` };
-          const before = this.page.url();
-          try {
-            await this.act({ tool: "click", target: closer.i }); await this.settle({ max: 2000 });
-            if (this.page.url() !== before) d.navigated = this.page.url();
-            else {
-              const after = await this.snapshot().catch(() => null);
-              const target = after?.elements.find(e => brief(e) === brief(act.el) && (e.near ?? "") === (act.el?.near ?? ""));
-              if (target?.covered) d.still_covered = true;
-            }
-          } catch (e) { d.error = actionError(e); }
-          log(`  ~ dismiss_overlay ${d.element}${d.error ? ` ! ${d.error}` : ""}${d.still_covered ? " (target still covered)" : ""}`);
-          history.push(d);
-        }
-      }
-      if (this.heldDialog) {
-        status = "needs_confirmation"; info = "the action opened a confirmation dialog that looks hard to undo, so it was dismissed; call again with allow_irreversible to accept it";
-        pending = { action: h.action, element: h.element, dialog: this.heldDialog.message, p_irreversible: this.heldDialog.p_irreversible };
-        break;
-      }
-    }
-    this.shown = page;
-    this.needsTabSnapshot = false;
-    if (this.events.length) history.push(...this.events.splice(0).map(e => ({ event: e })));
-    const out = { status, goal, url: this.page.url(), title: await this.page.title().catch(() => ""), actions: history, rounds, jev_calls: this.stats.calls - calls0, ms: Date.now() - t0 };
-    if (cacheHits || cacheSaved) out.cache = { hits: cacheHits, saved: cacheSaved };
-    if (info) out.info = info;
-    if (pending) out.pending = pending;
-    out.done_score = +(rounds.at(-1)?.done ?? 0);
-    if (!["done", "likely_done"].includes(status)) {
-      out.page_text = page?.text?.slice(0, 600);
-      if (["ambiguous", "stuck", "max_actions"].includes(status)) out.candidates = rounds.at(-1)?.candidates;
-    }
-    return out;
+  runGoal(goal, options = {}) {
+    this.driver ??= new PlaywrightDriver(this);
+    this.goalRunner ??= new GoalRunner(this.driver, new WebGoalStrategy(this, { backend: BACKEND, keys: KEYS, actionError, repeatsBlock }));
+    return this.goalRunner.run(goal, options);
   }
 
   async showDecision(act, r) {
@@ -1148,7 +944,7 @@ export class JevBrowser {
     const r = await this.runWebmcp(name, args, timeout);
     await this.settle({ max: 4000 });   // a tool may navigate or re-render
     const out = { tool: name, url: this.page.url(), ms: Date.now() - t0 };
-    if (r.error) out.error = r.error; else out.result = webmcpText(r.result);
+    if (r.error) Object.assign(out, { status: "error", error: r.error, outcome: "unknown" }); else out.result = webmcpText(r.result);
     if (this.events.length) out.events = this.events.splice(0);
     return out;
   }

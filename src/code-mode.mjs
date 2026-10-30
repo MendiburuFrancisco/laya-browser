@@ -6,7 +6,7 @@ import { errorDiagnostic, stoppedInfo } from "./diagnostics.mjs";
 export const executeShape = {
   code: z.string().min(1).max(50000).describe("JavaScript async function body. Use browser methods, values, await and return. No imports or Node APIs. See browser://code-mode/api."),
   values: z.record(z.string(), z.unknown()).optional().describe("JSON data available to the program; do not embed credentials in source"),
-  timeout_ms: z.number().int().min(100).max(300000).optional().describe("Wall time including browser calls; default 60000. Timeout closes the browser session."),
+  timeout_ms: z.number().int().min(100).max(300000).optional().describe("Wall time including browser calls; default 120000. Timeout closes the browser session."),
   max_operations: z.number().int().min(1).max(100).optional().describe("Browser API calls; default 30. run() also obeys the decision budget."),
   max_decision_calls: z.number().int().min(1).max(300).optional().describe("Shared Laya/Jev inference budget; default 100"),
   max_browser_actions: z.number().int().min(1).max(1000).optional().describe("Total low-level actions, including cache replay and nested run steps; default 100"),
@@ -35,7 +35,7 @@ export async function executeCode(input, { invoke, onAbort = async () => {}, sig
   const values = JSON.parse(JSON.stringify(args.values ?? {}));
   if (JSON.stringify(values).length > 128000) throw new Error("values exceeds 128000 characters");
   const controller = new AbortController();
-  const timeoutMs = args.timeout_ms ?? 60000;
+  const timeoutMs = args.timeout_ms ?? 120000;
   const progress = [];
   let operations = 0, stopped = false, active = false, abortActive = false, queue = Promise.resolve(), worker, timer;
   let complete;
@@ -102,7 +102,7 @@ export async function executeCode(input, { invoke, onAbort = async () => {}, sig
           if (result?.status && result.status !== "done" && result.status !== "completed") {
             const info = stoppedInfo(result);
             record.info = info;
-            return stop({ status: result.status, info, suspended: { operation: message.id, method: message.method, result } });
+            return stop({ status: result.status, info, ...(result.outcome ? { outcome: result.outcome } : {}), suspended: { operation: message.id, method: message.method, result } });
           }
           const json = JSON.stringify(result ?? null);
           if (json.length > 1000000) throw new ExecutionStop("limit_exceeded", "Intermediate result exceeds 1000000 characters");
@@ -110,9 +110,10 @@ export async function executeCode(input, { invoke, onAbort = async () => {}, sig
         } catch (error) {
           if (stopped) return;
           record.status = error.status ?? "error";
+          if (error.outcome) record.outcome = error.outcome;
           const diagnostic = errorDiagnostic(error, { phase: "operation", ...error.diagnostic, method: message.method });
           record.info = diagnostic.message;
-          stop({ status: record.status, info: diagnostic.message, error: diagnostic, failed_operation: message.id, failed_method: message.method });
+          stop({ status: record.status, info: diagnostic.message, error: diagnostic, ...(error.outcome ? { outcome: error.outcome } : {}), failed_operation: message.id, failed_method: message.method });
         }
       }).catch(error => stop({ status: "error", info: String(error.message).slice(0, 500) }));
     });

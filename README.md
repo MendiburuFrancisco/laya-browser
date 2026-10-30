@@ -613,7 +613,7 @@ The browser itself retains its normal navigation/network capabilities.
 
 | Limit | Default | Maximum |
 |---|---:|---:|
-| `timeout_ms` (includes browser calls and sandbox startup) | 60,000 | 300,000 |
+| `timeout_ms` (includes browser calls and sandbox startup) | 120,000 | 300,000 |
 | `max_operations` (browser API calls) | 30 | 100 |
 | `max_decision_calls` (Laya/Jev calls, shared across steps) | 100 | 300 |
 | `max_browser_actions` (includes cached actions and nested plans) | 100 | 1,000 |

@@ -146,6 +146,20 @@ test("operation failures retain method, multiline cause and completed progress o
   }
 });
 
+test("Code Mode preserves Appium operation phase and unknown outcome", async () => {
+  const r = await executeCode({ code: `await browser.open({app:{package:'com.demo'}});` }, {
+    invoke: async () => { throw Object.assign(new Error("Appium POST timed out"), {
+      code: "appium_timeout", outcome: "unknown",
+      diagnostic: { phase: "session_create", transport_phase: "http_headers", outcome: "unknown", attempt_id: "attempt-1" },
+    }); },
+  });
+  assert.equal(r.status, "error");
+  assert.equal(r.outcome, "unknown");
+  assert.equal(r.error.phase, "session_create");
+  assert.equal(r.error.transport_phase, "http_headers");
+  assert.equal(r.error.attempt_id, "attempt-1");
+});
+
 test("timeout includes nested run progress and cleanup failure does not hide the original error", async () => {
   const r = await executeCode({ code: `await browser.run({steps:[{goal:'first'},{goal:'second'}]});`, timeout_ms: 500 }, {
     invoke: async (_, __, { signal, onProgress }) => {

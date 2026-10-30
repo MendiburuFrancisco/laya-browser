@@ -11,3 +11,4 @@ export { AppiumAndroidDriver, ANDROID_CAPABILITIES } from "./drivers/appium/driv
 export { AppiumClient, AppiumError } from "./drivers/appium/client.mjs";
 export { parseAndroidSnapshot } from "./drivers/appium/android-snapshot.mjs";
 export { normalizeTarget } from "./target-config.mjs";
+export { GoalRunner } from "./goal-runner.mjs";
